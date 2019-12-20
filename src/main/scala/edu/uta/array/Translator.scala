@@ -47,7 +47,7 @@ object Translator {
         => MatchE(translate(e),
                   List(Case(p,BoolConst(true),
                             translateQualifiers(result,ns))))
-      case Predicate(Comprehension(e,s))::ns
+      case Predicate(Comprehension(_,s))::ns
         => Block(List(translateQualifiers(Sequence(Nil),s),
                       translateQualifiers(result,ns)))
       case Predicate(e)::ns
@@ -83,10 +83,10 @@ object Translator {
                                                            Var(vs)),
                                                  r) }
                    val re = lift(translate(Comprehension(result,s)))
-                   val nh = Sequence(List((translate(Tuple(List(k,Tuple(liftedVars.map(Var))))))))
+                   val nh = Sequence(List(translate(Tuple(List(k,Tuple(liftedVars.map(Var)))))))
                    flatMap(Lambda(TuplePat(List(p,VarPat(vs))),re),
                            groupBy(translateQualifiers(nh,r)))
-              case _ => val nh = Sequence(List((translate(result))))
+              case _ => val nh = Sequence(List(translate(result)))
                         translateQualifiers(nh,qs)
            }
       case _ => apply(e,translate)

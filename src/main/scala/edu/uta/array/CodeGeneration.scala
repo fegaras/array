@@ -78,7 +78,7 @@ abstract class CodeGeneration {
   def getOptionalType ( code: c.Tree, env: Environment ): Either[c.Tree,TypecheckException] = {
     val cc = var_decls.foldLeft(code){ case (r,(v,tq"($kt,$vt)"))
                                          => val vc = TermName(v)
-                                            q"($vc:Map[$kt,List[$vt]]) => $r" }
+                                            q"($vc:Map[$kt,$vt]) => $r" }
     val fc = env.foldLeft(cc){ case (r,(p,tq"Any"))
                                    => q"{ case $p => $r }"
                                  case (r,(p,tp))
@@ -125,7 +125,7 @@ abstract class CodeGeneration {
         case Left(atp)
           => val ctp = c.Expr[Any](c.typecheck(q"(x:$atp) => x.head")).actualType
              Some(returned_type(type2tree(ctp)))
-        case Right(s) => None
+        case Right(_) => None
       }
 
   /** For a collection e, return the element type and the code of e */
@@ -214,7 +214,7 @@ abstract class CodeGeneration {
     q"(..$vs) => $ne"
   }
 
-  var var_decls = collection.mutable.Map[String,c.Tree]()
+  private var var_decls = collection.mutable.Map[String,c.Tree]()
 
   /** Generate Scala code for Traversable (in-memory) collections */
   def codeGen ( e: Expr, env: Environment ): c.Tree = {
@@ -239,13 +239,16 @@ abstract class CodeGeneration {
            q"$xc.groupBy(_._1).mapValues( _.map(_._2))"
       case reduce(m,x)
         => val xc = codeGen(x,env)
-           q"$xc.reduce(_+_)"
+           val fnc = TermName(m)
+           q"$xc.reduce(_ $fnc _)"
       case Nth(x,n)
         => val xc = codeGen(x,env)
            val nc = TermName("_"+n)
            q"$xc.$nc"
       case Tuple(es)
         => codeList(es,cs => q"(..$cs)",env)
+      case Call("Map",Nil)
+        => q"Map[Any,Any]()"
       case Call("LMap",Nil)
         => q"Map[Any,List[Any]]()"
       case Call(n,es)
@@ -269,17 +272,17 @@ abstract class CodeGeneration {
         => val xc = codeGen(x,env)
            val fm = TermName(method_name(m))
            q"$xc.$fm"
-      case MethodCall(x@MapAccess(Var(v),k),m@":+",List(y))
-        => var_decls += ((v,typecheck(Tuple(List(k,y)),env)))
-           val tv = TermName(v)
+      case MethodCall(x,"=",List(y))
+        => val yc = codeGen(y,env)
+           val xc = codeGen(x,env)
+           q"$xc = $yc"
+      case MethodCall(x@MapAccess(Var(v),k),m,List(y))
+        => val z = if (m==":+") Sequence(List(y)) else y
+           var_decls += ((v,typecheck(Tuple(List(k,z)),env)))
            val xc = codeGen(x,env)
            val yc = codeGen(y,env)
            val fm = TermName(method_name(m))
            q"$xc.$fm($yc)"
-      case MethodCall(x,"=",List(y))
-        => val xc = codeGen(x,env)
-           val yc = codeGen(y,env)
-           q"$xc = $yc"
       case MethodCall(x,m,es)
         => val fm = TermName(method_name(m))
            codeList(x+:es,{ case cx+:cs => q"$cx.$fm(..$cs)" },env)
@@ -299,10 +302,14 @@ abstract class CodeGeneration {
                                        case (r,u) => codeGen(u,r); r }
            val sc = s.map(codeGen(_,nenv))
            q"{..$sc}"
+      case VarDecl(v,Call("Map",Nil))
+        => val vc = TermName(v)
+           val tq"($kt,$vt)" = var_decls(v)
+           q"var $vc = collection.mutable.Map[$kt,$vt]()"
       case VarDecl(v,Call("LMap",Nil))
         => val vc = TermName(v)
            val tq"($kt,$vt)" = var_decls(v)
-           q"var $vc = collection.mutable.Map[$kt,List[$vt]]()"
+           q"var $vc = collection.mutable.Map[$kt,$vt]()"
       case VarDecl(v,u)
         => val vc = TermName(v)
            val uc = codeGen(u,env)
@@ -320,7 +327,7 @@ abstract class CodeGeneration {
            val pc = TermName(v)
            val tp = getType(xc,env)
            typedCodeOpt(xc,env) match {
-                case Some(t)
+                case Some(_)
                   => val nv = Var(v)
                      val bc = codeGen(subst(Var(v),nv,b),add(p,tp,env))
                      return q"{ val $pc:$tp = $xc; $bc }"

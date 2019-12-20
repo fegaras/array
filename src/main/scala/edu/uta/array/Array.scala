@@ -24,24 +24,25 @@ import array.Translator.translate
 package object array {
 
   var optimize = true
+  var trace = true
 
   def translate_query ( query: String ): Expr = {
     val q = parse(query)
     if (!optimize)
       return translate(q)
-    println("Term:\n"+Pretty.print(q.toString))
+    if (trace) println("Term:\n"+Pretty.print(q.toString))
     val c = ComprehensionTranslator.translate(q)
-    println("Translated comprehension:\n"+Pretty.print(c.toString))
+    if (trace) println("Translated comprehension:\n"+Pretty.print(c.toString))
     val n = Normalizer.normalizeAll(c)
-    println("Normalized comprehension:\n"+Pretty.print(n.toString))
+    if (trace) println("Normalized comprehension:\n"+Pretty.print(n.toString))
     val o = Normalizer.normalizeAll(Optimizer.optimizeAll(n))
-    println("Optimized comprehension:\n"+Pretty.print(o.toString))
+    if (trace) println("Optimized comprehension:\n"+Pretty.print(o.toString))
     val e = translate(o)
-    println("Translated term:\n"+Pretty.print(e.toString))
+    if (trace) println("Translated term:\n"+Pretty.print(e.toString))
     e
   }
 
-  var typecheck_var: ( String ) => Option[Type] = null
+  var typecheck_var: String => Option[Type] = _
 
   def ar_impl ( c: Context ) ( query: c.Expr[String] ): c.Expr[Any] = {
     import c.universe.{Expr=>_,Type=>_,_}
@@ -49,13 +50,13 @@ package object array {
     val cg = new { val c: context.type = context } with CodeGeneration
     val Literal(Constant(s:String)) = query.tree
     // hook to the Scala compiler
-    typecheck_var = ( v: String ) => cg.typecheckOpt(Var(v)).map(cg.Tree2Type(_))
+    typecheck_var = ( v: String ) => cg.typecheckOpt(Var(v)).map(cg.Tree2Type)
     val e = translate_query(s)
     val env: cg.Environment = Map()
     val ec = cg.codeGen(e,env)
-    println("Scala code:\n"+showCode(ec))
+    if (trace) println("Scala code:\n"+showCode(ec))
     val tp = cg.getType(ec,env)
-    println("Scala type: "+showCode(tp))
+    if (trace) println("Scala type: "+showCode(tp))
     context.Expr[Any](ec)
   }
 

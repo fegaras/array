@@ -204,17 +204,17 @@ object AST {
         => es.map(f(_)).fold(zero)(acc)
       case Block(es)
         => es.map(f(_)).fold(zero)(acc)
-      case VarDecl(v,u)
+      case VarDecl(_,u)
         => f(u)
       case Comprehension(h,qs)
-        => acc(f(h),qs.map{
+        => (f(h)::qs.map{
               case Generator(_,u) => f(u)
               case LetBinding(_,u) => f(u)
               case Predicate(u) => f(u)
               case GroupByQual(_,k) => f(k)
               case AssignQual(d,u) => acc(f(d),f(u))
               case VarDef(_,u) => f(u)
-           }.reduce(acc))
+           }).reduce(acc)
       case _ => zero
     }
 

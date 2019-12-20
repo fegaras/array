@@ -19,7 +19,6 @@ import scala.util.parsing.combinator.lexical.StdLexical
 import scala.util.parsing.combinator.syntactical.StandardTokenParsers
 import scala.util.parsing.combinator.token.StdTokens
 import scala.util.matching.Regex
-import scala.util.parsing.input.Position
 
 
 trait MyTokens extends StdTokens {
@@ -46,15 +45,15 @@ class MyLexical extends StdLexical with MyTokens {
 
   /* long integers */
   def longLit: Parser[Token]
-      = regex("""[0-9]+[Ll]""".r) ^^ { LongLit(_) }
+      = regex("""[0-9]+[Ll]""".r) ^^ LongLit
 
   /* floating point numbers */
   def doubleLit: Parser[Token]
-      = regex("""[0-9]*[\.][0-9]+([eE][+-]?[0-9]+)?[FfDd]?""".r) ^^ { DoubleLit(_) }
+      = regex("""[0-9]*[\.][0-9]+([eE][+-]?[0-9]+)?[FfDd]?""".r) ^^ DoubleLit
 
   /* character literal */
   def charLit: Parser[Token]
-      = regex("""'[^']'""".r) ^^ { CharLit(_) }
+      = regex("""'[^']'""".r) ^^ CharLit
 
   /* an infix operator can be any sequence of special chars, except delimiters, etc */ 
   def infixOpr: Parser[Token]
@@ -131,7 +130,7 @@ object Parser extends StandardTokenParsers {
 
   def factor: Parser[Expr]
       = term ~ rep( opt( "." ) ~ ident ~ opt( "(" ~> repsep( expr, "," ) <~ ")"
-                                            | expr ^^ {(x:Expr) => List(x)} ) ) ^^
+                                            | expr ^^ { (x:Expr) => List(x) } ) ) ^^
         { case a~as => as.foldLeft(a){ case (r,_~n~Some(xs)) => MethodCall(r,n,xs)
                                        case (r,_~n~_) => MethodCall(r,n,null) } }
 
@@ -196,7 +195,7 @@ object Parser extends StandardTokenParsers {
         | pat ~ ("<-" | "=") ~ expr ^^
           { case p~"<-"~e => Generator(p,e)
             case p~"="~e => LetBinding(p,e) }
-        | expr ^^ { Predicate(_) }
+        | expr ^^ Predicate
         | failure("illegal start of qualifier")
         )
 
@@ -246,7 +245,6 @@ object Parser extends StandardTokenParsers {
   }
 
   def main ( args: Array[String] ) {
-    import edu.uta.array.Pretty
     println("input : "+ args(0))
     println(Pretty.print(parse(args(0)).toString))
   }
