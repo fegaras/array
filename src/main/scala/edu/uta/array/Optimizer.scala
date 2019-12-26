@@ -153,7 +153,7 @@ object Optimizer {
                                      replace(jg,LetBinding(VarPat(j),Var(i)),
                                              replace(ig,Generator(VarPat(i),MethodCall(mx,"until",List(mn))),
                                                      qs)))
-                   optimize(Comprehension(h,nqs))
+                   optimize(Normalizer.normalize(Comprehension(h,nqs)))
              case _ => apply(e,optimize)
            }
       case Comprehension(h,qs)

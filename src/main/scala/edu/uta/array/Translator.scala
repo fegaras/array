@@ -32,7 +32,7 @@ object Translator {
   def translateQualifiers ( result: Expr, qs: List[Qualifier] ): Expr =
     qs match {
       case Nil
-        => result
+        => Sequence(List(translate(result)))
       case Generator(p,e)::ns
         => val te = translate(e)
            val ne = translateQualifiers(result,ns)
@@ -48,7 +48,7 @@ object Translator {
                   List(Case(p,BoolConst(true),
                             translateQualifiers(result,ns))))
       case Predicate(Comprehension(_,s))::ns
-        => Block(List(translateQualifiers(Sequence(Nil),s),
+        => Block(List(translateQualifiers(s),
                       translateQualifiers(result,ns)))
       case Predicate(e)::ns
         => translateQualifiers(IfE(translate(e),result,Sequence(Nil)),ns)
@@ -58,6 +58,39 @@ object Translator {
       case AssignQual(d,e)::ns
         => Block(List(MethodCall(translate(d),"=",List(translate(e))),
                       translateQualifiers(result,ns)))
+      case q::_ => throw new Error("Unrecognized qualifier: "+q)
+    }
+
+  /** Translate a sequence of query qualifiers to an expression */
+  def translateQualifiers ( qs: List[Qualifier] ): Expr =
+    qs match {
+      case Nil
+        => Block(Nil)
+      case Generator(p,e)::ns
+        => val te = translate(e)
+           val ne = translateQualifiers(ns)
+           Call("foreach",List(Lambda(p,ne),te))
+      case LetBinding(VarPat(v),e)::ns
+        => val te = translateQualifiers(ns)
+           if (AST.occurrences(v,te) > 1)
+              MatchE(translate(e),
+                     List(Case(VarPat(v),BoolConst(true),te)))
+           else AST.subst(v,translate(e),te)
+      case LetBinding(p,e)::ns
+        => MatchE(translate(e),
+                  List(Case(p,BoolConst(true),
+                            translateQualifiers(ns))))
+      case Predicate(Comprehension(_,s))::ns
+        => Block(List(translateQualifiers(s),
+                      translateQualifiers(ns)))
+      case Predicate(e)::ns
+        => IfE(translate(e),translateQualifiers(ns),Block(Nil))
+      case VarDef(v,e)::ns
+        => Block(List(VarDecl(v,translate(e)),
+                      translateQualifiers(ns)))
+      case AssignQual(d,e)::ns
+        => Block(List(MethodCall(translate(d),"=",List(translate(e))),
+                      translateQualifiers(ns)))
       case q::_ => throw new Error("Unrecognized qualifier: "+q)
     }
 
@@ -82,12 +115,15 @@ object Translator {
                          case (v,r) => AST.subst(v,flatMap(Lambda(lp,Sequence(List(Var(v)))),
                                                            Var(vs)),
                                                  r) }
-                   val re = lift(translate(Comprehension(result,s)))
-                   val nh = Sequence(List(translate(Tuple(List(k,Tuple(liftedVars.map(Var)))))))
+                   val re = translate(lift(Comprehension(result,s)))
+                   val nh = Tuple(List(k,Tuple(liftedVars.map(Var))))
                    flatMap(Lambda(TuplePat(List(p,VarPat(vs))),re),
                            groupBy(translateQualifiers(nh,r)))
-              case _ => val nh = Sequence(List(translate(result)))
-                        translateQualifiers(nh,qs)
+              case _ => result match {
+                          case Block(Nil)
+                            => translateQualifiers(qs)
+                          case _ => translateQualifiers(result,qs)
+                        }
            }
       case _ => apply(e,translate)
     }

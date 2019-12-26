@@ -23,7 +23,7 @@ import java.io._
 
 abstract class CodeGeneration {
   val c: Context
-  import c.universe.{Expr=>_,Block=>_,_}
+  import c.universe.{Expr=>_,Block=>_,Apply=>_,_}
   import AST._
 
   var line: Int = 0
@@ -100,6 +100,7 @@ abstract class CodeGeneration {
       case Right(ex)
         => println(s"Typechecking error at line $line: ${ex.msg}")
            println("Code: "+code)
+           println("Var Decls: "+var_decls)
            println("Bindings: "+env)
            val sw = new StringWriter
            ex.printStackTrace(new PrintWriter(sw))
@@ -216,6 +217,24 @@ abstract class CodeGeneration {
 
   private var var_decls = collection.mutable.Map[String,c.Tree]()
 
+  def mapAccess ( x: Expr, i: Expr, env: Environment ): c.Tree = {
+    val xc = codeGen(x,env)
+    val ic = codeGen(i,env)
+    (getType(xc,env),ic,getType(ic,env)) match {
+      case (tq"edu.uta.array.Matrix",q"($i,$j)",_)
+        => q"$xc($i,$j)"
+      case (tq"Array[$t]",q"(..$is)",_)
+        => is.foldLeft[c.Tree](xc) { case (r,n) => q"$r($n)" }
+      case (tq"Array[$t]",_,tq"(..$its)")
+        if its.length > 1
+        => val as = (1 to its.length).foldLeft[c.Tree](xc) {
+                          case (r,n) => val v = TermName("_"+n); q"$r(k.$v)"
+                    }
+           q"{ val k = $ic; $as }"
+      case _ => q"$xc($ic)"
+    }
+  }
+
   /** Generate Scala code for Traversable (in-memory) collections */
   def codeGen ( e: Expr, env: Environment ): c.Tree = {
     e match {
@@ -234,12 +253,18 @@ abstract class CodeGeneration {
            if (irrefutable(p))
               q"$xc.flatMap(($nv:$tp) => $nv match { case $pc => $bc })"
            else q"$xc.flatMap(($nv:$tp) => $nv match { case $pc => $bc; case _ => Nil })"
+      case Call("foreach",List(Lambda(p,b),x))
+        => val pc = code(p)
+           val (tp,xc) = typedCode(x,env)
+           val nv = TermName(c.freshName("x"))
+           val bc = codeGen(b,add(p,tp,env))
+           q"$xc.foreach(($nv:$tp) => $nv match { case $pc => $bc })"
       case groupBy(x)
         => val xc = codeGen(x,env)
            q"$xc.groupBy(_._1).mapValues( _.map(_._2))"
       case reduce(m,x)
         => val xc = codeGen(x,env)
-           val fnc = TermName(m)
+           val fnc = TermName(method_name(m))
            q"$xc.reduce(_ $fnc _)"
       case Nth(x,n)
         => val xc = codeGen(x,env)
@@ -248,9 +273,10 @@ abstract class CodeGeneration {
       case Tuple(es)
         => codeList(es,cs => q"(..$cs)",env)
       case Call("Map",Nil)
-        => q"Map[Any,Any]()"
-      case Call("LMap",Nil)
-        => q"Map[Any,List[Any]]()"
+        => q"scala.collection.mutable.Map[Any,Any]()"
+      case Call("Array",d)
+        => val dc = d.map(codeGen(_,env))
+           q"Array.fill(..$dc)(0.0)"
       case Call(n,es)
         => val fm = TermName(method_name(n))
            codeList(es,cs => q"$fm(..$cs)",env)
@@ -278,18 +304,24 @@ abstract class CodeGeneration {
            q"$xc = $yc"
       case MethodCall(x@MapAccess(Var(v),k),m,List(y))
         => val z = if (m==":+") Sequence(List(y)) else y
-           var_decls += ((v,typecheck(Tuple(List(k,z)),env)))
            val xc = codeGen(x,env)
            val yc = codeGen(y,env)
+           getType(codeGen(Var(v),env),env) match {
+             case tq"scala.collection.mutable.Map[Any,Any]"
+               => var_decls += ((v,typecheck(Tuple(List(k,z)),env)))
+             case _ => ;
+           }
            val fm = TermName(method_name(m))
            q"$xc.$fm($yc)"
+      case Apply(f,x)
+        => val fc = codeGen(f,env)
+           val xc = codeGen(x,env)
+           q"$fc($xc)"
       case MethodCall(x,m,es)
         => val fm = TermName(method_name(m))
            codeList(x+:es,{ case cx+:cs => q"$cx.$fm(..$cs)" },env)
       case MapAccess(v,k)
-        => val vc = codeGen(v,env)
-           val kc = codeGen(k,env)
-           q"$vc($kc)"
+        => mapAccess(v,k,env)
       case Sequence(Nil)
         => q"Nil"
       case Sequence(s)
@@ -303,10 +335,6 @@ abstract class CodeGeneration {
            val sc = s.map(codeGen(_,nenv))
            q"{..$sc}"
       case VarDecl(v,Call("Map",Nil))
-        => val vc = TermName(v)
-           val tq"($kt,$vt)" = var_decls(v)
-           q"var $vc = collection.mutable.Map[$kt,$vt]()"
-      case VarDecl(v,Call("LMap",Nil))
         => val vc = TermName(v)
            val tq"($kt,$vt)" = var_decls(v)
            q"var $vc = collection.mutable.Map[$kt,$vt]()"

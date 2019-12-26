@@ -70,8 +70,7 @@ object Parser extends StandardTokenParsers {
                           "||", "&&", "!", "=", "==", "<=", ">=", "<", ">", "!=", "+", "-", "*", "/", "%",
                           "^", "|", "&" )
 
-  lexical.reserved += ("group", "by", "array", "idx",
-                       "abstract", "do", "finally", "import", "until",
+  lexical.reserved += ("group", "by", "abstract", "do", "finally", "import", "until",
                        "object", "return", "trait", "var", "case", "else", "for", "lazy", "override",
                        "sealed", "try", "while", "catch", "extends", "forSome", "match", "package",
                        "super", "true", "with", "class", "false", "if", "new", "private", "this",
@@ -140,14 +139,11 @@ object Parser extends StandardTokenParsers {
 
   def term: Parser[Expr]
       = ( compr
-        | "array" ~ "(" ~ repsep( expr, "," ) ~ ")" ~ compr ^^
-          { case _~_~el~_~c => Call("array",List(Tuple(el),c)) }
-        | "idx" ~ compr ^^
-          { case _~c => Call("idx",List(c)) }
+        | ident ~ "(" ~ repsep( expr, "," ) ~ ")" ~ opt( compr ) ^^
+          { case n~_~el~_~Some(c) => Call(n,List(Tuple(el),c))
+            case n~_~es~_~None => Call(n,es) }
         | "if" ~ "(" ~ expr ~ ")" ~ expr ~ "else" ~ expr ^^
           { case _~_~p~_~t~_~e => IfE(p,t,e) }
-        | ident ~ "(" ~ repsep( expr, "," ) ~ ")" ^^
-          { case n~_~es~_ => Call(n,es) }
         | "new" ~> ident ~ opt( "(" ~> repsep( expr, "," ) <~ ")" ) ^^
           { case n~Some(es) => Constructor(n,es)
             case n~_ => Constructor(n,Nil) }

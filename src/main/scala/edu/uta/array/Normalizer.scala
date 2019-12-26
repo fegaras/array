@@ -179,6 +179,7 @@ object Normalizer {
       case Comprehension(h,Predicate(p)::qs)
         => IfE(p,Comprehension(h,qs),empty())
       case Comprehension(h,Generator(p,c@Comprehension(_,_))::qs)
+        if false
         => val Comprehension(h2,s) = renameVars(c)
            normalize(Comprehension(h,(s:+LetBinding(p,h2))++qs))
       case Comprehension(h,qs)

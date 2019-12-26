@@ -28,8 +28,6 @@ package object array {
 
   def translate_query ( query: String ): Expr = {
     val q = parse(query)
-    if (!optimize)
-      return translate(q)
     if (trace) println("Term:\n"+Pretty.print(q.toString))
     val c = ComprehensionTranslator.translate(q)
     if (trace) println("Translated comprehension:\n"+Pretty.print(c.toString))
@@ -62,6 +60,20 @@ package object array {
 
   /** translate an array comprehension to Scala code */
   def ar ( query: String ): Any = macro ar_impl
+
+  def param_impl ( c: Context ) ( x: c.Expr[Boolean], b: c.Expr[Boolean] ): c.Expr[Unit] = {
+    import c.universe._
+    val Literal(Constant(bv:Boolean)) = b.tree
+    x.tree.toString.split('.').last match {
+       case "optimize" => optimize = bv
+       case "trace" => trace = bv
+       case p => throw new Error("Wrong param: "+p)
+    }
+    c.Expr[Unit](q"()")
+   }
+
+  /** set compilation parameters */
+  def param ( x:Boolean, b: Boolean ): Unit = macro param_impl
 }
 
 object Test {

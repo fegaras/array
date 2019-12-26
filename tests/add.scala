@@ -9,12 +9,12 @@ object Test {
     val n = args(0).toInt
 
     val M = Array.tabulate(n,n){ (i,j) => rand.nextDouble() }
+    val N = Array.tabulate(n,n){ (i,j) => rand.nextDouble() }
 
     var t: Long = System.currentTimeMillis()
 
     ar("""
-       [ ((+/m)[i],*/m,+/j,j.length,+/(m.map(_+3.0))) | m[i,j] <- M, group by i ]
-//[ (j,m) | m[i,j] <- M, group by i ]
+       Array(n,n)[ (m+n)[i,j] | m[i,j] <- M, n[ii,jj] <- N, ii == i, jj == j ]
     """)
 
     println("**** run time: "+(System.currentTimeMillis()-t)/1000.0+" secs")
