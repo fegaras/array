@@ -164,9 +164,11 @@ object Parser extends StandardTokenParsers {
         | ident ~ "=>" ~ expr ^^
           { case v~_~b => Lambda(VarPat(v),b) }
         | ident ~ "[" ~ repsep( expr, "," ) ~ "]"
-          ^^ { case v~_~es~_ => Tuple(List(Tuple(es),Var(v))) }
+          ^^ { case v~_~List(e)~_ => Tuple(List(e,Var(v)))
+               case v~_~es~_ => Tuple(List(Tuple(es),Var(v))) }
         | "(" ~ expr ~ ")" ~ "[" ~ repsep( expr, "," ) ~ "]"
-          ^^ { case _~e~_~_~es~_ => Tuple(List(Tuple(es),e)) }
+          ^^ { case _~e~_~_~List(k)~_ => Tuple(List(k,e))
+               case _~e~_~_~es~_ => Tuple(List(Tuple(es),e)) }
         | "(" ~ repsep( expr, "," ) ~ ")" ^^
           { case _~es~_ => if (es.length==1) es.head else Tuple(es) }
         | double ^^
@@ -207,7 +209,8 @@ object Parser extends StandardTokenParsers {
             case _~_~_~Some(_) => throw new Exception("Wrong star pattern")
             case n~_~ps~_ => CallPat(n,ps) }
         | ident ~ "[" ~ repsep( pat, "," ) ~ "]"
-          ^^ { case v~_~ps~_ => TuplePat(List(TuplePat(ps),VarPat(v))) }
+          ^^ { case v~_~List(p)~_ => TuplePat(List(p,VarPat(v)))
+               case v~_~ps~_ => TuplePat(List(TuplePat(ps),VarPat(v))) }
         | "true" ^^^ { BooleanPat(true) }
         | "false" ^^^ { BooleanPat(false) }
         | ident ~ "@" ~ pat

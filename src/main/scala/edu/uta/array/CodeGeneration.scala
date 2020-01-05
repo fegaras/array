@@ -78,7 +78,10 @@ abstract class CodeGeneration {
   def getOptionalType ( code: c.Tree, env: Environment ): Either[c.Tree,TypecheckException] = {
     val cc = var_decls.foldLeft(code){ case (r,(v,tq"($kt,$vt)"))
                                          => val vc = TermName(v)
-                                            q"($vc:Map[$kt,$vt]) => $r" }
+                                            q"($vc:Map[$kt,$vt]) => $r"
+                                       case (r,(v,vt))
+                                         => val vc = TermName(v)
+                                            q"($vc:Array[$vt]) => $r" }
     val fc = env.foldLeft(cc){ case (r,(p,tq"Any"))
                                    => q"{ case $p => $r }"
                                  case (r,(p,tp))
@@ -124,8 +127,10 @@ abstract class CodeGeneration {
   def typedCodeOpt ( ec: c.Tree, env: Environment ): Option[c.Tree]
     = getOptionalType(ec,env) match {
         case Left(atp)
-          => val ctp = c.Expr[Any](c.typecheck(q"(x:$atp) => x.head")).actualType
-             Some(returned_type(type2tree(ctp)))
+          => try {
+                val ctp = c.Expr[Any](c.typecheck(q"(x:$atp) => x.head")).actualType
+                Some(returned_type(type2tree(ctp)))
+             } catch { case ex: TypecheckException => return None }
         case Right(_) => None
       }
 
@@ -239,6 +244,9 @@ abstract class CodeGeneration {
   def codeGen ( e: Expr, env: Environment ): c.Tree = {
     e match {
       case flatMap(Lambda(p,Sequence(List(b))),x)
+        if toExpr(p) == b
+        => codeGen(x,env)
+      case flatMap(Lambda(p,Sequence(List(b))),x)
         if irrefutable(p)
         => val pc = code(p)
            val (tp,xc) = typedCode(x,env)
@@ -276,7 +284,7 @@ abstract class CodeGeneration {
         => q"scala.collection.mutable.Map[Any,Any]()"
       case Call("Array",d)
         => val dc = d.map(codeGen(_,env))
-           q"Array.fill(..$dc)(0.0)"
+           q"Array.ofDim[Any](..$dc)"
       case Call(n,es)
         => val fm = TermName(method_name(n))
            codeList(es,cs => q"$fm(..$cs)",env)
@@ -309,6 +317,8 @@ abstract class CodeGeneration {
            getType(codeGen(Var(v),env),env) match {
              case tq"scala.collection.mutable.Map[Any,Any]"
                => var_decls += ((v,typecheck(Tuple(List(k,z)),env)))
+             case tq"Array[Any]"
+               => var_decls += ((v,typecheck(z,env)))
              case _ => ;
            }
            val fm = TermName(method_name(m))
@@ -338,6 +348,11 @@ abstract class CodeGeneration {
         => val vc = TermName(v)
            val tq"($kt,$vt)" = var_decls(v)
            q"var $vc = collection.mutable.Map[$kt,$vt]()"
+      case VarDecl(v,Call("Array",d))
+        => val vc = TermName(v)
+           val dc = d.map(codeGen(_,env))
+           val tp = var_decls(v)
+           q"var $vc = Array.ofDim[$tp](..$dc)"
       case VarDecl(v,u)
         => val vc = TermName(v)
            val uc = codeGen(u,env)

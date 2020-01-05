@@ -28,6 +28,14 @@ object ComprehensionTranslator {
         case _ => Nil
       }
 
+  def yieldReductions ( e: Expr, vars: List[String] ): Expr
+    = e match {
+        case MethodCall(Var(v),"length",null)
+          if vars.contains(v)
+          => reduce("+",MethodCall(Var(v),"map",List(Lambda(VarPat("x"),IntConst(1)))))
+        case _ => apply(e,yieldReductions(_,vars))
+      }
+
   def findReducedTerms ( e: Expr, vars: List[String] ): List[(String,Expr)]
     = e match {
         case reduce(_,Var(v))
@@ -35,6 +43,9 @@ object ComprehensionTranslator {
           => List((v,e))
         case reduce(_,flatMap(_,Var(v)))
           if vars.contains(v)
+          => List((v,e))
+        case reduce(_,MethodCall(Var(v),f,_))
+          if List("map","flatMap").contains(f) && vars.contains(v)
           => List((v,e))
         case Var(v)
           if vars.contains(v)
@@ -48,7 +59,8 @@ object ComprehensionTranslator {
                 => val groupByVars = patvars(p)
                    val usedVars = freevars(Comprehension(result,s),groupByVars)
                                               .intersect(comprVars(r)).distinct
-                   val rt = findReducedTerms(Comprehension(result,s),usedVars)
+                   val rt = findReducedTerms(yieldReductions(Comprehension(result,s),usedVars),
+                                             usedVars)
                    val reducedTerms = rt.filter{ case (_,reduce(_,_)) => true; case _ => false }
                                         .map(x => (newvar,x._2))
                    val reducedVars = reducedTerms.map(_._1)
@@ -73,7 +85,7 @@ object ComprehensionTranslator {
                             }
                    def lift ( x: Expr ): Expr
                      = env.foldLeft(x) { case (r,(from,to)) => AST.subst(from,to,r) }
-                   val Comprehension(nh,ns) = lift(Comprehension(result,s))
+                   val Comprehension(nh,ns) = lift(yieldReductions(Comprehension(result,s),usedVars))
                    val init = (if (liftedVars.isEmpty) Nil else List(VarDef(xv,Call("Map",Nil)))) ++
                                     reducedVars.map(v => VarDef(v,Call("Map",Nil)))
                    val incr = (if (liftedVars.isEmpty) Nil else List(AssignQual(MapAccess(Var(xv),Var(kv)),
@@ -83,6 +95,13 @@ object ComprehensionTranslator {
                                                                List(le)),
                                                     Sequence(List(le)))))) ++
                                     reducedTerms.map {
+                                       case (v,reduce(m,MethodCall(e,"map",List(f))))
+                                         => AssignQual(MapAccess(Var(v),Var(kv)),
+                                                       IfE(MethodCall(Var(v),"contains",List(Var(kv))),
+                                                           MethodCall(MapAccess(Var(v),Var(kv)),
+                                                                      m,
+                                                                      List(Apply(f,e))),
+                                                           Apply(f,e)))
                                        case (v,reduce(m,e))
                                          => AssignQual(MapAccess(Var(v),Var(kv)),
                                                        IfE(MethodCall(Var(v),"contains",List(Var(kv))),
@@ -144,7 +163,7 @@ object ComprehensionTranslator {
         if optimize && key == toExpr(p)
         => val groupByVars = patvars(p)
            val usedVars = freevars(result,groupByVars).intersect(comprVars(qs)).distinct
-           val rt = findReducedTerms(result,usedVars)
+           val rt = findReducedTerms(yieldReductions(result,usedVars),usedVars)
            val reducedTerms = rt.filter{ case (_,reduce(_,_)) => true; case _ => false }
                                 .map(x => (newvar,x._2))
            val reducedVars = reducedTerms.map(_._1)
@@ -161,6 +180,7 @@ object ComprehensionTranslator {
            val env = reducedTerms.map{ case (v,t) => (t,MapAccess(Var(v),Var(kv))) } ++
                                liftedVars.map(v => (Var(v),Comprehension(Var(v),
                                                       List(Generator(lp,MapAccess(Var(xv),Var(kv)))))))
+println("@@@ "+rt+"     "+reducedTerms+"       "+env)
            val le = liftedVars match {
                               case List(v)
                                 => Var(v)
@@ -169,7 +189,7 @@ object ComprehensionTranslator {
                             }
            def lift ( x: Expr ): Expr
              = env.foldLeft(x) { case (r,(from,to)) => AST.subst(from,to,r) }
-           val ne = lift(e)
+           val ne = lift(yieldReductions(e,usedVars))
            val init = (if (liftedVars.isEmpty) Nil else List(VarDecl(xv,Call(array,d)))) ++
                                     reducedVars.map(v => VarDecl(v,Call(array,d)))
            val incr = (if (liftedVars.isEmpty) Nil else List(AssignQual(MapAccess(Var(xv),Var(kv)),
@@ -177,6 +197,11 @@ object ComprehensionTranslator {
                                                                ":+",
                                                                List(le))))) ++
                                     reducedTerms.map {
+                                       case (v,reduce(m,MethodCall(e,"map",List(f))))
+                                         => AssignQual(MapAccess(Var(v),Var(kv)),
+                                                           MethodCall(MapAccess(Var(v),Var(kv)),
+                                                                      m,
+                                                                      List(Apply(f,e))))
                                        case (v,reduce(m,e))
                                          => AssignQual(MapAccess(Var(v),Var(kv)),
                                                            MethodCall(MapAccess(Var(v),Var(kv)),
@@ -211,7 +236,8 @@ object ComprehensionTranslator {
            val is = d.map(_ => newvar)
            Block(List(VarDecl(v,Call(array,d)),
                       Comprehension(Block(Nil),
-                            List(Generator(TuplePat(List(TuplePat(is.map(VarPat)),VarPat("v"))),translate(c)),
+                            List(Generator(TuplePat(List(TuplePat(is.map(VarPat)),VarPat("v"))),
+                                           translate(c)),
                                  AssignQual(MapAccess(Var(v),Tuple(is.map(Var))),Var("v")))),
                       Var(v)))
       case Comprehension(result,qs)

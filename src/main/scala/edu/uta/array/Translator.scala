@@ -51,7 +51,9 @@ object Translator {
         => Block(List(translateQualifiers(s),
                       translateQualifiers(result,ns)))
       case Predicate(e)::ns
-        => translateQualifiers(IfE(translate(e),result,Sequence(Nil)),ns)
+        => IfE(translate(e),
+               Sequence(List(translateQualifiers(result,ns))),
+               Sequence(Nil))
       case VarDef(v,e)::ns
         => Block(List(VarDecl(v,translate(e)),
                       translateQualifiers(result,ns)))
