@@ -76,17 +76,14 @@ abstract class CodeGeneration {
    *  @return the type of code, if the code is typechecked without errors
    */
   def getOptionalType ( code: c.Tree, env: Environment ): Either[c.Tree,TypecheckException] = {
-    val cc = var_decls.foldLeft(code){ case (r,(v,tq"($kt,$vt)"))
+    val cc = var_decls.foldLeft(code){ case (r,(v,vt))
                                          => val vc = TermName(v)
-                                            q"($vc:Map[$kt,$vt]) => $r"
-                                       case (r,(v,vt))
-                                         => val vc = TermName(v)
-                                            q"($vc:Array[$vt]) => $r" }
+                                            q"($vc:$vt) => $r" }
     val fc = env.foldLeft(cc){ case (r,(p,tq"Any"))
-                                   => q"{ case $p => $r }"
-                                 case (r,(p,tp))
-                                   => val nv = TermName(c.freshName("x"))
-                                      q"($nv:$tp) => $nv match { case $p => $r }" }
+                                 => q"{ case $p => $r }"
+                               case (r,(p,tp))
+                                 => val nv = TermName(c.freshName("x"))
+                                    q"($nv:$tp) => $nv match { case $p => $r }" }
     val te = try c.Expr[Any](c.typecheck(q"{ import edu.uta.array._; $fc }")).actualType
              catch { case ex: TypecheckException => return Right(ex) }
     Left(returned_type(type2tree(te)))
@@ -222,6 +219,21 @@ abstract class CodeGeneration {
 
   private var var_decls = collection.mutable.Map[String,c.Tree]()
 
+  def element_type ( tp: c.Tree ): c.Tree
+    = tp match {
+        case tq"Array[$atp]"
+          => element_type(atp)
+        case _ => tp
+      }
+
+  def set_element_type ( tp: c.Tree, etp: c.Tree ): c.Tree
+    = tp match {
+        case tq"Array[$atp]"
+          => val ntp = set_element_type(atp,etp)
+             tq"Array[$ntp]"
+        case _ => etp
+      }
+
   def mapAccess ( x: Expr, i: Expr, env: Environment ): c.Tree = {
     val xc = codeGen(x,env)
     val ic = codeGen(i,env)
@@ -261,6 +273,11 @@ abstract class CodeGeneration {
            if (irrefutable(p))
               q"$xc.flatMap(($nv:$tp) => $nv match { case $pc => $bc })"
            else q"$xc.flatMap(($nv:$tp) => $nv match { case $pc => $bc; case _ => Nil })"
+      case Call("foreach",List(Lambda(p@VarPat(v),b),x))
+        => val (tp,xc) = typedCode(x,env)
+           val nv = TermName(v)
+           val bc = codeGen(b,add(p,tp,env))
+           q"$xc.foreach(($nv:$tp) => $bc)"
       case Call("foreach",List(Lambda(p,b),x))
         => val pc = code(p)
            val (tp,xc) = typedCode(x,env)
@@ -306,21 +323,42 @@ abstract class CodeGeneration {
         => val xc = codeGen(x,env)
            val fm = TermName(method_name(m))
            q"$xc.$fm"
-      case MethodCall(x,"=",List(y))
+      case MethodCall(x@MapAccess(Var(v),k),"=",List(y))
         => val yc = codeGen(y,env)
+           val ty = getType(yc,env)
+           getType(codeGen(Var(v),env),env) match {
+             case tq"scala.collection.mutable.Map[Any,Any]"
+               => val tk = typecheck(k,env)
+                  var_decls += ((v,tq"Map[$tk,$ty]"))
+             case tp
+               => element_type(tp) match {
+                     case tq"Any"
+                       => var_decls += ((v,set_element_type(tp,ty)))
+                     case _ => ;
+                  }
+           }
+           val xc = codeGen(x,env)   // must be last
+           q"$xc = $yc"
+      case MethodCall(x,"=",List(y))
+        => val yc = codeGen(y,env)  // y must be first to setup var_decls
            val xc = codeGen(x,env)
            q"$xc = $yc"
       case MethodCall(x@MapAccess(Var(v),k),m,List(y))
         => val z = if (m==":+") Sequence(List(y)) else y
-           val xc = codeGen(x,env)
            val yc = codeGen(y,env)
            getType(codeGen(Var(v),env),env) match {
              case tq"scala.collection.mutable.Map[Any,Any]"
-               => var_decls += ((v,typecheck(Tuple(List(k,z)),env)))
-             case tq"Array[Any]"
-               => var_decls += ((v,typecheck(z,env)))
-             case _ => ;
+               => val tk = typecheck(k,env)
+                  val tz = typecheck(z,env)
+                  var_decls += ((v,tq"Map[$tk,$tz]"))
+             case tp
+               => element_type(tp) match {
+                     case tq"Any"
+                       => var_decls += ((v,set_element_type(tp,typecheck(z,env))))
+                     case _ => ;
+                  }
            }
+           val xc = codeGen(x,env)   // must be last
            val fm = TermName(method_name(m))
            q"$xc.$fm($yc)"
       case Apply(f,x)
@@ -341,18 +379,21 @@ abstract class CodeGeneration {
         => val nenv = s.foldLeft(env){ case (r,VarDecl(v,u))
                                          => val tv = TermName(v)
                                             r + ((pq"$tv",typecheck(u,r)))
-                                       case (r,u) => codeGen(u,r); r }
-           val sc = s.map(codeGen(_,nenv))
-           q"{..$sc}"
+                                       case (r,u) => r }
+           val stmts = s.flatMap{ case VarDecl(_,_) => Nil; case x => List(codeGen(x,nenv)) }
+           val decls = s.flatMap{ case x@VarDecl(_,_) => List(codeGen(x,nenv)); case x => Nil }
+           q"{ ..$decls; ..$stmts }"
       case VarDecl(v,Call("Map",Nil))
         => val vc = TermName(v)
-           val tq"($kt,$vt)" = var_decls(v)
-           q"var $vc = collection.mutable.Map[$kt,$vt]()"
+           if (var_decls.contains(v)) {
+              val tq"Map[$kt,$vt]" = var_decls(v)
+              q"var $vc = collection.mutable.Map[$kt,$vt]()"
+           } else q"var $vc = collection.mutable.Map[Any,Any]()"
       case VarDecl(v,Call("Array",d))
         => val vc = TermName(v)
            val dc = d.map(codeGen(_,env))
-           val tp = var_decls(v)
-           q"var $vc = Array.ofDim[$tp](..$dc)"
+           val etp = if (var_decls.contains(v)) element_type(var_decls(v)) else tq"Any"
+           q"var $vc = Array.ofDim[$etp](..$dc)"
       case VarDecl(v,u)
         => val vc = TermName(v)
            val uc = codeGen(u,env)

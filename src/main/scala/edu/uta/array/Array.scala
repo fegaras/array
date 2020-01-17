@@ -35,7 +35,7 @@ package object array {
     if (trace) println("Normalized comprehension:\n"+Pretty.print(n.toString))
     val o = Normalizer.normalizeAll(Optimizer.optimizeAll(n))
     if (trace) println("Optimized comprehension:\n"+Pretty.print(o.toString))
-    val e = translate(o)
+    val e = Normalizer.normalizeAll(translate(o))
     if (trace) println("Translated term:\n"+Pretty.print(e.toString))
     e
   }

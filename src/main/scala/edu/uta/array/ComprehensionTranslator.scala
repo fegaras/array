@@ -136,8 +136,8 @@ object ComprehensionTranslator {
         case _ => Nil
       }
 
-  def translate ( e: Expr ): Expr
-    = e match {
+  def translate ( e: Expr ): Expr = {
+    e match {
       case Var(a)
         => typecheck_var(a) match {
               case Some(BasicType("edu.uta.array.Matrix"))
@@ -180,7 +180,7 @@ object ComprehensionTranslator {
            val env = reducedTerms.map{ case (v,t) => (t,MapAccess(Var(v),Var(kv))) } ++
                                liftedVars.map(v => (Var(v),Comprehension(Var(v),
                                                       List(Generator(lp,MapAccess(Var(xv),Var(kv)))))))
-println("@@@ "+rt+"     "+reducedTerms+"       "+env)
+//println("@@@ "+rt+"     "+reducedTerms+"       "+env)
            val le = liftedVars match {
                               case List(v)
                                 => Var(v)
@@ -229,21 +229,22 @@ println("@@@ "+rt+"     "+reducedTerms+"       "+env)
            val nr = nqs ++ List(LetBinding(TuplePat(List(VarPat(kv),VarPat(v))),nh),
                                 AssignQual(MapAccess(Var(nv),Var(kv)),Var(v)))
            translate(Block(List(VarDecl(nv,Call(array,d)),
-                           Comprehension(Block(Nil),nr),Var(nv))))
+                                Comprehension(Block(Nil),nr),Var(nv))))
       case Call(array,List(Tuple(d),c@Comprehension(_,_)))
         if !optimize
         => val v = newvar
            val is = d.map(_ => newvar)
-           Block(List(VarDecl(v,Call(array,d)),
+           translate(Block(List(VarDecl(v,Call(array,d)),
                       Comprehension(Block(Nil),
                             List(Generator(TuplePat(List(TuplePat(is.map(VarPat)),VarPat("v"))),
                                            translate(c)),
                                  AssignQual(MapAccess(Var(v),Tuple(is.map(Var))),Var("v")))),
-                      Var(v)))
+                      Var(v))))
       case Comprehension(result,qs)
         if optimize
         => val (nh,nqs) = translate_comprehension(result,qs)
            apply(Comprehension(nh,nqs),translate)
       case _ => apply(e,translate)
     }
+  }
 }

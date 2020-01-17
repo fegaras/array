@@ -13,8 +13,8 @@ object Test {
     var t: Long = System.currentTimeMillis()
 
     ar("""
-       [ ((+/m)[i],*/m,+/j,j.length,+/(m.map(_+3.0))) | m[i,j] <- M, group by i ]
-//[ (j,m) | m[i,j] <- M, group by i ]
+       [ ((+/m)[i],*/m,+/j,j.length,+/(m.map(x => x+3.0))) | m[i,j] <- M, group by i ]
+
     """)
 
     println("**** run time: "+(System.currentTimeMillis()-t)/1000.0+" secs")

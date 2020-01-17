@@ -178,10 +178,11 @@ object Normalizer {
         => elem(normalize(h))
       case Comprehension(h,Predicate(p)::qs)
         => IfE(p,Comprehension(h,qs),empty())
+/*
       case Comprehension(h,Generator(p,c@Comprehension(_,_))::qs)
-        if false
         => val Comprehension(h2,s) = renameVars(c)
            normalize(Comprehension(h,(s:+LetBinding(p,h2))++qs))
+*/
       case Comprehension(h,qs)
         => normalize(h,qs,Map()) match {
              case nqs:+LetBinding(VarPat("@result"),nh)
@@ -195,6 +196,11 @@ object Normalizer {
         => normalize(x)
       case reduce(m,Sequence(Nil))
         => empty()
+      case Block(Nil)
+        => e
+      case Block(l)
+        if l.map{ case Block(_) => true; case _ => false }.reduce(_||_)
+        => Block(l.flatMap{ case Block(s) => s; case x => List(x) })
       case IfE(BoolConst(true),e1,_)
         => normalize(e1)
       case IfE(BoolConst(false),_,e2)
