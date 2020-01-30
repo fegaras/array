@@ -29,16 +29,16 @@ object Translator {
       }
 
   /** Translate a sequence of query qualifiers to an expression */  
-  def translateQualifiers ( result: Expr, qs: List[Qualifier] ): Expr =
+  def translateQualifiers ( hds: List[Expr], qs: List[Qualifier] ): Expr =
     qs match {
       case Nil
-        => Sequence(List(translate(result)))
+        => Sequence(hds.map(translate))
       case Generator(p,e)::ns
         => val te = translate(e)
-           val ne = translateQualifiers(result,ns)
+           val ne = translateQualifiers(hds,ns)
            flatMap(Lambda(p,ne),te)
       case LetBinding(VarPat(v),e)::ns
-        => val te = translateQualifiers(result,ns)
+        => val te = translateQualifiers(hds,ns)
            if (AST.occurrences(v,te) > 1)
               MatchE(translate(e),
                      List(Case(VarPat(v),BoolConst(true),te)))
@@ -46,20 +46,20 @@ object Translator {
       case LetBinding(p,e)::ns
         => MatchE(translate(e),
                   List(Case(p,BoolConst(true),
-                            translateQualifiers(result,ns))))
+                            translateQualifiers(hds,ns))))
       case Predicate(Comprehension(_,s))::ns
         => Block(List(translateQualifiers(s),
-                      translateQualifiers(result,ns)))
+                      translateQualifiers(hds,ns)))
       case Predicate(e)::ns
         => IfE(translate(e),
-               Sequence(List(translateQualifiers(result,ns))),
+               translateQualifiers(hds,ns),
                Sequence(Nil))
       case VarDef(v,e)::ns
         => Block(List(VarDecl(v,translate(e)),
-                      translateQualifiers(result,ns)))
+                      translateQualifiers(hds,ns)))
       case AssignQual(d,e)::ns
         => Block(List(MethodCall(translate(d),"=",List(translate(e))),
-                      translateQualifiers(result,ns)))
+                      translateQualifiers(hds,ns)))
       case q::_ => throw new Error("Unrecognized qualifier: "+q)
     }
 
@@ -99,11 +99,11 @@ object Translator {
   /** Translate comprehensions to the algebra */
   def translate ( e: Expr ): Expr =
     e match {
-      case Comprehension(result,qs)
+      case Comprehension(hds,qs)
         => qs.span{ case GroupByQual(_,_) => false; case _ => true } match {
               case (r,GroupByQual(p,k)::s)
                 => val groupByVars = patvars(p)
-                   val liftedVars = freevars(Comprehension(result,s),groupByVars)
+                   val liftedVars = freevars(Comprehension(hds,s),groupByVars)
                                          .intersect(comprVars(r))
                    val lp = liftedVars match {
                               case List(v)
@@ -117,15 +117,13 @@ object Translator {
                          case (v,r) => AST.subst(v,flatMap(Lambda(lp,Sequence(List(Var(v)))),
                                                            Var(vs)),
                                                  r) }
-                   val re = translate(lift(Comprehension(result,s)))
+                   val re = translate(lift(Comprehension(hds,s)))
                    val nh = Tuple(List(k,Tuple(liftedVars.map(Var))))
                    flatMap(Lambda(TuplePat(List(p,VarPat(vs))),re),
-                           groupBy(translateQualifiers(nh,r)))
-              case _ => result match {
-                          case Block(Nil)
-                            => translateQualifiers(qs)
-                          case _ => translateQualifiers(result,qs)
-                        }
+                           groupBy(translateQualifiers(List(nh),r)))
+              case _ => if (hds.isEmpty)
+                           translateQualifiers(qs)
+                        else translateQualifiers(hds,qs)
            }
       case _ => apply(e,translate)
     }

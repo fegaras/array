@@ -134,13 +134,14 @@ object Parser extends StandardTokenParsers {
                                        case (r,_~n~_) => MethodCall(r,n,null) } }
 
   def compr: Parser[Comprehension]
-    = "[" ~ expr ~ "|" ~ repsep( qual, "," ) ~ "]" ^^
+    = "[" ~ repsep( expr, "," ) ~ "|" ~ repsep( qual, "," ) ~ "]" ^^
       { case _~e~_~qs~_ => Comprehension(e,qs) }
 
   def term: Parser[Expr]
       = ( compr
         | ident ~ "(" ~ repsep( expr, "," ) ~ ")" ~ opt( compr ) ^^
-          { case n~_~el~_~Some(c) => Call(n,List(Tuple(el),c))
+          { case n~_~List(v@Var(_))~_~Some(c) => Call(n,List(v,c))
+            case n~_~el~_~Some(c) => Call(n,List(Tuple(el),c))
             case n~_~es~_~None => Call(n,es) }
         | "if" ~ "(" ~ expr ~ ")" ~ expr ~ "else" ~ expr ^^
           { case _~_~p~_~t~_~e => IfE(p,t,e) }

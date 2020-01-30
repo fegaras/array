@@ -15,7 +15,7 @@
  */
 package edu.uta.array
 
-import edu.uta.array.ComprehensionTranslator.translate
+//import edu.uta.array.ComprehensionTranslator.translate
 
 object ComprehensionTranslator {
   import AST._
@@ -53,7 +53,8 @@ object ComprehensionTranslator {
         case _ => accumulate[List[(String,Expr)]](e,findReducedTerms(_,vars),_++_,Nil)
       }
 
-  def translate_comprehension ( result: Expr, qs: List[Qualifier] ): (Expr,List[Qualifier]) = {
+  @scala.annotation.tailrec
+  def translate_comprehension(result: List[Expr], qs: List[Qualifier] ): (List[Expr],List[Qualifier]) = {
     qs.span{ case GroupByQual(_,_) => false; case _ => true } match {
               case (r,GroupByQual(p,k)::s)
                 => val groupByVars = patvars(p)
@@ -75,7 +76,7 @@ object ComprehensionTranslator {
                    val kv = newvar
                    val xv = newvar
                    val env = reducedTerms.map{ case (v,t) => (t,MapAccess(Var(v),Var(kv))) } ++
-                                       liftedVars.map(v => (Var(v),Comprehension(Var(v),
+                                       liftedVars.map(v => (Var(v),Comprehension(List(Var(v)),
                                                    List(Generator(lp,MapAccess(Var(xv),Var(kv)))))))
                    val le = liftedVars match {
                               case List(v)
@@ -117,7 +118,7 @@ object ComprehensionTranslator {
                             else Var(xv)
                    translate_comprehension(nh,
                                            init
-                                           ++ List(Predicate(Comprehension(BoolConst(true),nqs)),
+                                           ++ List(Predicate(Comprehension(List(BoolConst(true)),nqs)),
                                                    Generator(VarPat(kv),MethodCall(rv,"keys",null)),
                                                    LetBinding(p,Var(kv)))
                                            ++ ns)
@@ -143,8 +144,8 @@ object ComprehensionTranslator {
               case Some(BasicType("edu.uta.array.Matrix"))
                 => val i = newvar
                    val j = newvar
-                   Comprehension(Tuple(List(Tuple(List(Var(i),Var(j))),
-                                            MapAccess(Var(a),Tuple(List(Var(i),Var(j)))))),
+                   Comprehension(List(Tuple(List(Tuple(List(Var(i),Var(j))),
+                                            MapAccess(Var(a),Tuple(List(Var(i),Var(j))))))),
                       List(Generator(VarPat(i),
                                      MethodCall(IntConst(0),"until",
                                                 List(MethodCall(e,"rows",null)))),
@@ -155,11 +156,11 @@ object ComprehensionTranslator {
                 => val gs = array_generators(e,tp)
                    val is = if (gs.length == 1) Var(gs.head._1) else Tuple(gs.map(x => Var(x._1)))
                    val mas = gs.foldLeft[Expr](e){ case (r,(v,_)) => MapAccess(r,Var(v)) }
-                   Comprehension(Tuple(List(is,mas)),
+                   Comprehension(List(Tuple(List(is,mas))),
                                  gs.map(_._2))
               case _ => Var(a)
            }
-      case Call(array,List(Tuple(d),Comprehension(result@Tuple(List(key,e)),qs:+GroupByQual(p,k))))
+      case Call(array,List(Tuple(d),Comprehension(List(result@Tuple(List(key,e))),qs:+GroupByQual(p,k))))
         if optimize && key == toExpr(p)
         => val groupByVars = patvars(p)
            val usedVars = freevars(result,groupByVars).intersect(comprVars(qs)).distinct
@@ -178,7 +179,7 @@ object ComprehensionTranslator {
            val kv = newvar
            val xv = newvar
            val env = reducedTerms.map{ case (v,t) => (t,MapAccess(Var(v),Var(kv))) } ++
-                               liftedVars.map(v => (Var(v),Comprehension(Var(v),
+                               liftedVars.map(v => (Var(v),Comprehension(List(Var(v)),
                                                       List(Generator(lp,MapAccess(Var(xv),Var(kv)))))))
 //println("@@@ "+rt+"     "+reducedTerms+"       "+env)
            val le = liftedVars match {
@@ -213,29 +214,37 @@ object ComprehensionTranslator {
            ne match {
              case MapAccess(Var(v),Var(k))
                if reducedVars.contains(v) && k == kv
-               => translate(Block(init ++ List(Comprehension(Block(Nil),nqs),Var(reducedVars.head))))
+               => translate(Block(init ++ List(Comprehension(Nil,nqs),Var(reducedVars.head))))
              case _
               => val rv = newvar
                  translate(Block(VarDecl(rv,Call(array,d))::init
-                              ++ List(Comprehension(Block(Nil),
+                              ++ List(Comprehension(Nil,
                                           nqs :+ AssignQual(MapAccess(Var(rv),Var(kv)),ne)),Var(rv))))
            }
-      case Call(array,List(Tuple(d),Comprehension(result,qs)))
+      case Call("Array",List(Var(nv),Comprehension(hs,qs)))
         if optimize
-        => val (nh,nqs) = translate_comprehension(result,qs)
+        => val (nhs,nqs) = translate_comprehension(hs,qs)
+           val kv = newvar
+           val v = newvar
+           val nr = nqs ++ List(Generator(TuplePat(List(VarPat(kv),VarPat(v))),Sequence(nhs)),
+                                AssignQual(MapAccess(Var(nv),Var(kv)),Var(v)))
+           translate(Block(List(Comprehension(Nil,nr),Var(nv))))
+      case Call(array,List(Tuple(d),Comprehension(hs,qs)))
+        if optimize
+        => val (nhs,nqs) = translate_comprehension(hs,qs)
            val nv = newvar
            val kv = newvar
            val v = newvar
-           val nr = nqs ++ List(LetBinding(TuplePat(List(VarPat(kv),VarPat(v))),nh),
+           val nr = nqs ++ List(Generator(TuplePat(List(VarPat(kv),VarPat(v))),Sequence(nhs)),
                                 AssignQual(MapAccess(Var(nv),Var(kv)),Var(v)))
            translate(Block(List(VarDecl(nv,Call(array,d)),
-                                Comprehension(Block(Nil),nr),Var(nv))))
+                                Comprehension(Nil,nr),Var(nv))))
       case Call(array,List(Tuple(d),c@Comprehension(_,_)))
         if !optimize
         => val v = newvar
            val is = d.map(_ => newvar)
            translate(Block(List(VarDecl(v,Call(array,d)),
-                      Comprehension(Block(Nil),
+                      Comprehension(Nil,
                             List(Generator(TuplePat(List(TuplePat(is.map(VarPat)),VarPat("v"))),
                                            translate(c)),
                                  AssignQual(MapAccess(Var(v),Tuple(is.map(Var))),Var("v")))),

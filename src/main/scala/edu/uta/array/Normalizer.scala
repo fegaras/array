@@ -88,20 +88,21 @@ object Normalizer {
         case _ => true
       }
 
-  def canInline ( p: Pattern, head: Expr, qs: List[Qualifier] ): Boolean
+  @scala.annotation.tailrec
+  def canInline(p: Pattern, hds: Expr, qs: List[Qualifier] ): Boolean
     = qs match {
-        case GroupByQual(gp,ge)::r
-          if gp == p
-          => canInline(p,head,r)
         case GroupByQual(gp,_)::r
-          => patvars(p).map( s => occurrences(s,Comprehension(head,r)) ).sum == 0
-        case _::r => canInline(p,head,r)
+          if gp == p
+          => canInline(p,hds,r)
+        case GroupByQual(_,_)::r
+          => patvars(p).map( s => occurrences(s,Comprehension(List(hds),r)) ).sum == 0
+        case _::r => canInline(p,hds,r)
         case Nil => true
       }
 
   def renameVars ( e: Comprehension ): Comprehension
     = e match {
-        case Comprehension(h,qs)
+        case Comprehension(hds,qs)
           => val vs = comprVars(qs)
              val env = vs.map(_ -> newvar).toMap
              val enve = env.map{ case (v,w) => (v,Var(w)) }
@@ -119,7 +120,7 @@ object Normalizer {
                           case VarDef(v,u)
                             => VarDef(v,substE(u,enve))
                        }
-             Comprehension(substE(h,enve),nqs)
+             Comprehension(hds.map(substE(_,enve)),nqs)
       }
 
   def empty () = Sequence(Nil)
@@ -129,15 +130,15 @@ object Normalizer {
   def normalize ( head: Expr, qs: List[Qualifier], env: Map[String,Expr] ): List[Qualifier] =
     qs match {
       case Nil
-        => List(LetBinding(VarPat("@result"),normalize(substE(head,env))))
+        => List(LetBinding(VarPat("@result"),substE(head,env)))
       case Generator(p,Sequence(List(u)))::r
         => normalize(head,LetBinding(p,u)::r,env)
-      case Generator(_,Sequence(Nil))::r
+      case Generator(_,Sequence(Nil))::_
         => Nil
-      case Generator(p,c@Comprehension(_,s))::r
+      case Generator(p,c@Comprehension(List(_),s))::r
         if canInline(s)
-        => val Comprehension(h,s) = renameVars(c)
-           normalize(head,(s:+LetBinding(p,h))++r,env)
+        => val Comprehension(List(hd),s) = renameVars(c)
+           normalize(head,(s:+LetBinding(p,hd))++r,env)
       case Generator(p,u)::r
         => Generator(p,normalize(substE(u,env)))::normalize(head,r,freeEnv(p,env))
       case LetBinding(TuplePat(ps),Tuple(es))::r
@@ -146,7 +147,7 @@ object Normalizer {
         => if (canInline(p,head,r))
               normalize(head,r,bindEnv(p,normalize(substE(u,env)))++freeEnv(p,env))
            else LetBinding(p,normalize(substE(u,env)))::normalize(head,r,env)
-      case Predicate(BoolConst(false))::r
+      case Predicate(BoolConst(false))::_
         => Nil
       case Predicate(BoolConst(true))::r
         => normalize(head,r,env)
@@ -174,8 +175,8 @@ object Normalizer {
       case Let(VarPat(v),u,b)
         if isSimple(u) || occurrences(v,b) <= 1
         => normalize(subst(Var(v),u,b))
-      case Comprehension(h,List())
-        => elem(normalize(h))
+      case Comprehension(hds,List())
+        => Sequence(hds.map(normalize))
       case Comprehension(h,Predicate(p)::qs)
         => IfE(p,Comprehension(h,qs),empty())
 /*
@@ -183,9 +184,9 @@ object Normalizer {
         => val Comprehension(h2,s) = renameVars(c)
            normalize(Comprehension(h,(s:+LetBinding(p,h2))++qs))
 */
-      case Comprehension(h,qs)
-        => normalize(h,qs,Map()) match {
-             case nqs:+LetBinding(VarPat("@result"),nh)
+      case Comprehension(hds,qs)
+        => normalize(Tuple(hds),qs,Map()) match {
+             case nqs:+LetBinding(VarPat("@result"),Tuple(nh))
                => val nc = Comprehension(nh,nqs)
                   if (nc == e)
                      apply(nc,normalize)

@@ -66,7 +66,7 @@ sealed abstract class Expr extends Positional
     case class Sequence ( args: List[Expr] ) extends Expr
     case class Block ( args: List[Expr] ) extends Expr
     case class VarDecl( name: String, value: Expr ) extends Expr
-    case class Comprehension ( head: Expr, qualifiers: List[Qualifier] ) extends Expr
+    case class Comprehension ( head: List[Expr], qualifiers: List[Qualifier] ) extends Expr
     case class reduce ( monoid: String, input: Expr ) extends Expr
     case class flatMap ( function: Lambda, input: Expr ) extends Expr
     case class groupBy ( input: Expr ) extends Expr
@@ -127,13 +127,13 @@ object AST {
       case Lambda(p,b)
         => Lambda(p,f(b))
       case Call(n,es)
-        => Call(n,es.map(f(_)))
+        => Call(n,es.map(f))
       case MethodCall(o,m,null)
         => MethodCall(f(o),m,null)
       case MethodCall(o,m,es)
-        => MethodCall(f(o),m,es.map(f(_)))
+        => MethodCall(f(o),m,es.map(f))
       case Constructor(n,es)
-        => Constructor(n,es.map(f(_)))
+        => Constructor(n,es.map(f))
       case Apply(h,a)
         => Apply(f(h),f(a))
       case Let(p,v,b)
@@ -141,17 +141,17 @@ object AST {
       case IfE(p,x,y)
         => IfE(f(p),f(x),f(y))
       case Tuple(es)
-        => Tuple(es.map(f(_)))
+        => Tuple(es.map(f))
       case MatchE(x,cs)
         => MatchE(f(x),cs.map{ case Case(p,c,b) => Case(p,f(c),f(b)) })
       case Sequence(es)
-        => Sequence(es.map(f(_)))
+        => Sequence(es.map(f))
       case Block(es)
-        => Block(es.map(f(_)))
+        => Block(es.map(f))
       case VarDecl(v,u)
         => VarDecl(v,f(u))
       case Comprehension(h,qs)
-        => Comprehension(f(h),qs.map(apply(_,f)))
+        => Comprehension(h.map(f),qs.map(apply(_,f)))
       case _ => e
     }
 
@@ -189,9 +189,9 @@ object AST {
       case MethodCall(o,_,null)
         => f(o)
       case MethodCall(o,_,es)
-        => es.map(f(_)).fold(f(o))(acc)
+        => es.map(f).fold(f(o))(acc)
       case Constructor(_,es)
-        => es.map(f(_)).fold(zero)(acc)
+        => es.map(f).fold(zero)(acc)
       case Apply(h,a)
         => acc(f(h),f(a))
       case Let(_,v,b)
@@ -199,15 +199,15 @@ object AST {
       case IfE(p,x,y)
         => acc(f(p),acc(f(x),f(y)))
       case Tuple(es)
-        => es.map(f(_)).fold(zero)(acc)
+        => es.map(f).fold(zero)(acc)
       case Sequence(es)
-        => es.map(f(_)).fold(zero)(acc)
+        => es.map(f).fold(zero)(acc)
       case Block(es)
-        => es.map(f(_)).fold(zero)(acc)
+        => es.map(f).fold(zero)(acc)
       case VarDecl(_,u)
         => f(u)
       case Comprehension(h,qs)
-        => (f(h)::qs.map{
+        => (h.map(f)++qs.map{
               case Generator(_,u) => f(u)
               case LetBinding(_,u) => f(u)
               case Predicate(u) => f(u)
@@ -278,8 +278,8 @@ object AST {
         if capture(v,p)
         => lp
       case Comprehension(h,qs)
-        => subst(v,te,h,qs) match {
-             case nqs:+Predicate(nh)
+        => subst(v,te,Tuple(h),qs) match {
+             case nqs:+Predicate(Tuple(nh))
                => Comprehension(nh,nqs)
              case _ => throw new Error("Wrong comprehension: "+e)
            }
@@ -320,7 +320,7 @@ object AST {
                           => if (capture(v,p)) 0
                              else occurrences(v,c)+occurrences(v,b) }.sum
       case Comprehension(h,qs)
-        => qs.foldLeft(occurrences(v,h)) {
+        => qs.foldLeft(occurrences(v,Tuple(h))) {
               case (r,Generator(p,u))
                 => occurrences(v,u) + (if (capture(v,p)) 0 else r)
               case (r,LetBinding(p,u))
@@ -372,7 +372,7 @@ object AST {
               case ((fl,el),VarDef(w,u))
                 => (fl++freevars(u,el),el:+w)
            }
-           fs++freevars(h,es)
+           fs++freevars(Tuple(h),es)
       case _ => accumulate[List[String]](e,freevars(_,except),_++_,Nil)
     }
 

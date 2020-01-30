@@ -82,6 +82,14 @@ object Optimizer {
                                   case _ => None })
                   case _ => None })
 
+  def findBoundRange ( qs: List[Qualifier] ): Option[List[Qualifier]]
+    = matchQ(qs,{ case Generator(VarPat(_),MethodCall(_,"until",_)) => true; case _ => false },
+                { case (g1@Generator(VarPat(v),MethodCall(_,"until",_)))::s
+                    => matchQ(s,{ case Predicate(MethodCall(Var(v1),"==",List(e))) => v==v1; case _ => false },
+                                { case g2::_ => Some(List(g1,g2))
+                                  case _ => None })
+                  case _ => None })
+
   /* true if the group-by key is a constant; then there will be just one group */
   def constantKey ( key: Expr ): Boolean
     = key match {
@@ -110,10 +118,10 @@ object Optimizer {
             case Var(i) => List(i)
             case Nth(u,_) => comps(u)
             case MethodCall(u,op,List(c))
-              if (Seq("+","-","*").contains(op) && constantKey(c))
+              if Seq("+","-","*").contains(op) && constantKey(c)
               => comps(u)
             case MethodCall(c,op,List(u))
-              if (Seq("+","-","*").contains(op) && constantKey(c))
+              if Seq("+","-","*").contains(op) && constantKey(c)
               => comps(u)
             case _ => List("%") // will fail to match
          }
@@ -166,10 +174,19 @@ object Optimizer {
              case _ => apply(e,optimize)
            }
       case Comprehension(h,qs)
+        if { QLcache = findBoundRange(qs); QLcache.nonEmpty }
+        => // eliminate bound range generators
+           QLcache match {
+             case Some(List(g@Generator(p,_),c@Predicate(MethodCall(Var(v1),"==",List(ev)))))
+               => val nqs = replace(c,Predicate(BoolConst(true)),replace(g,LetBinding(p,ev),qs))
+                  optimize(Comprehension(h,nqs))
+             case _ => apply(e,optimize)
+           }
+      case Comprehension(h,qs)
         => qs.span{ case GroupByQual(p,k) if constantKey(k) => false; case _ => true } match {
               case (r,GroupByQual(VarPat(k),u)::s)
                 => // a group-by on a constant key can be eliminated
-                   val vs = comprVars(r).map(v => LetBinding(VarPat(v),Comprehension(Var(v),r)))
+                   val vs = comprVars(r).map(v => LetBinding(VarPat(v),Comprehension(List(Var(v)),r)))
                    val bs = LetBinding(VarPat(k),u)::vs
                    Comprehension(h,bs++s)
               case _

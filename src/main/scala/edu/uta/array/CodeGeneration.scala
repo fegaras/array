@@ -237,6 +237,8 @@ abstract class CodeGeneration {
   def mapAccess ( x: Expr, i: Expr, env: Environment ): c.Tree = {
     val xc = codeGen(x,env)
     val ic = codeGen(i,env)
+        println("@@@ "+x+" "+i+" "+env)
+        println("### "+getType(xc,env)+" "+ic+" "+getType(ic,env))
     (getType(xc,env),ic,getType(ic,env)) match {
       case (tq"edu.uta.array.Matrix",q"($i,$j)",_)
         => q"$xc($i,$j)"
