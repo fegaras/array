@@ -45,7 +45,7 @@ sealed abstract class Qualifier
     case class LetBinding ( pattern: Pattern, domain: Expr ) extends Qualifier
     case class Predicate ( predicate: Expr ) extends Qualifier
     case class GroupByQual ( pattern: Pattern, key: Expr ) extends Qualifier
-    case class AssignQual ( dest: MapAccess, value: Expr ) extends Qualifier
+    case class AssignQual ( dest: Expr, value: Expr ) extends Qualifier
     case class VarDef ( name: String, value: Expr ) extends Qualifier
 
 case class Case ( pat: Pattern, condition: Expr, body: Expr )
@@ -107,7 +107,7 @@ object AST {
       case GroupByQual(p,k)
         => GroupByQual(p,f(k))
       case AssignQual(d,e)
-        => AssignQual(f(d).asInstanceOf[MapAccess],f(e))
+        => AssignQual(f(d),f(e))
       case VarDef(n,e)
         => VarDef(n,f(e))
     }
@@ -254,7 +254,7 @@ object AST {
       case GroupByQual(p,k)::r
         => GroupByQual(p,subst(v,te,k))::(if (capture(v,p)) r:+Predicate(hd) else subst(v,te,hd,r))
       case AssignQual(d,u)::r
-        => AssignQual(subst(v,te,d).asInstanceOf[MapAccess],subst(v,te,u))::subst(v,te,hd,r)
+        => AssignQual(subst(v,te,d),subst(v,te,u))::subst(v,te,hd,r)
       case VarDef(w,u)::r
         => VarDef(w,subst(v,te,u))::(if (v == w) r:+Predicate(hd) else subst(v,te,hd,r))
     }

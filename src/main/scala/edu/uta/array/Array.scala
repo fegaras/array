@@ -41,14 +41,16 @@ package object array {
   }
 
   var typecheck_var: String => Option[Type] = _
+  var typecheck_expr: Expr => Option[Type] = _
 
   def ar_impl ( c: Context ) ( query: c.Expr[String] ): c.Expr[Any] = {
     import c.universe.{Expr=>_,Type=>_,_}
     val context: c.type = c
     val cg = new { val c: context.type = context } with CodeGeneration
     val Literal(Constant(s:String)) = query.tree
-    // hook to the Scala compiler
+    // hooks to the Scala compiler
     typecheck_var = ( v: String ) => cg.typecheckOpt(Var(v)).map(cg.Tree2Type)
+    typecheck_expr = ( e: Expr) => cg.typecheckOpt(e).map(cg.Tree2Type)
     val e = translate_query(s)
     val env: cg.Environment = Map()
     val ec = cg.codeGen(e,env)

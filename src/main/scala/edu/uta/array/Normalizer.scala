@@ -89,7 +89,7 @@ object Normalizer {
       }
 
   @scala.annotation.tailrec
-  def canInline(p: Pattern, hds: Expr, qs: List[Qualifier] ): Boolean
+  def canInline ( p: Pattern, hds: Expr, qs: List[Qualifier] ): Boolean
     = qs match {
         case GroupByQual(gp,_)::r
           if gp == p
@@ -98,6 +98,12 @@ object Normalizer {
           => patvars(p).map( s => occurrences(s,Comprehension(List(hds),r)) ).sum == 0
         case _::r => canInline(p,hds,r)
         case Nil => true
+      }
+
+  def pure ( e: Expr ): Boolean
+    = e match {
+        case Call("random",_) => false
+        case _ => accumulate[Boolean](e,pure,_&&_,true)
       }
 
   def renameVars ( e: Comprehension ): Comprehension
@@ -144,7 +150,7 @@ object Normalizer {
       case LetBinding(TuplePat(ps),Tuple(es))::r
         => normalize(head,(ps zip es).map{ case (p,e) => LetBinding(p,e) }++r,env)
       case LetBinding(p,u)::r
-        => if (canInline(p,head,r))
+        => if (pure(u) && canInline(p,head,r))
               normalize(head,r,bindEnv(p,normalize(substE(u,env)))++freeEnv(p,env))
            else LetBinding(p,normalize(substE(u,env)))::normalize(head,r,env)
       case Predicate(BoolConst(false))::_
@@ -158,7 +164,7 @@ object Normalizer {
            val nenv = freeEnv(p,env).map{ case (v,x) => (v,elem(x)) }
            GroupByQual(p,normalize(substE(u,env)))::normalize(head,r,nenv)
       case AssignQual(d,v)::r
-        => AssignQual(substE(d,env).asInstanceOf[MapAccess],substE(v,env))::normalize(head,r,env)
+        => AssignQual(substE(d,env),substE(v,env))::normalize(head,r,env)
       case VarDef(v,u)::r
         => VarDef(v,substE(u,env))::normalize(head,r,env)
     }
