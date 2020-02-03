@@ -235,6 +235,23 @@ object ComprehensionTranslator {
            val nr = nqs ++ ls :+ AssignQual(Tuple(vs.map{ case (k,_) => MapAccess(Var(nv),Var(k)) }),
                                             Tuple(vs.map{ case (_,v) => Var(v) }))
            translate(Block(List(Comprehension(Nil,nr),Var(nv))))
+      case reduce(op,Comprehension(hs,qs))
+        if optimize
+        => val (nhs,nqs) = translate_comprehension(hs,qs)
+           val nv = newvar
+           val nr = nqs ++ nhs.map { case h => AssignQual(Var(nv),MethodCall(Var(nv),op,List(h))) }
+           translate(Block(List(VarDecl(nv,IntConst(0)),
+                                Comprehension(Nil,nr),Var(nv))))
+      case Call(array,List(Tuple(d),Comprehension(hs,qs)))
+        if optimize
+        => val (nhs,nqs) = translate_comprehension(hs,qs)
+           val nv = newvar
+           val nr = nqs ++ nhs.flatMap {
+                              case h => val (kv,v) = (newvar,newvar)
+                                        List(LetBinding(TuplePat(List(VarPat(kv),VarPat(v))),h),
+                                             AssignQual(MapAccess(Var(nv),Var(kv)),Var(v))) }
+           translate(Block(List(VarDecl(nv,Call(array,d)),
+                                Comprehension(Nil,nr),Var(nv))))
       case Call(array,List(Tuple(d),Comprehension(hs,qs)))
         if optimize
         => val (nhs,nqs) = translate_comprehension(hs,qs)

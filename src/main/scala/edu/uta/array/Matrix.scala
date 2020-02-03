@@ -16,7 +16,7 @@
 package edu.uta.array
 
 case class Matrix ( rows: Int, cols: Int ) {
-  val V = Array.fill(rows*cols)(0.0D)
+  var V = Array.fill(rows*cols)(0.0D)
 
   def head = V(0)
 

@@ -397,13 +397,13 @@ abstract class CodeGeneration {
         => val vc = TermName(v)
            if (var_decls.contains(v)) {
               val tq"Map[$kt,$vt]" = var_decls(v)
-              q"var $vc = collection.mutable.Map[$kt,$vt]()"
-           } else q"var $vc = collection.mutable.Map[Any,Any]()"
+              q"val $vc = collection.mutable.Map[$kt,$vt]()"
+           } else q"val $vc = collection.mutable.Map[Any,Any]()"
       case VarDecl(v,Call("Array",d))
         => val vc = TermName(v)
            val dc = d.map(codeGen(_,env))
            val etp = if (var_decls.contains(v)) element_type(var_decls(v)) else tq"Any"
-           q"var $vc = Array.ofDim[$etp](..$dc)"
+           q"val $vc = Array.ofDim[$etp](..$dc)"
       case VarDecl(v,u)
         => val vc = TermName(v)
            val uc = codeGen(u,env)
