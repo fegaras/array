@@ -15,7 +15,6 @@
  */
 package edu.uta.array
 
-//import edu.uta.array.ComprehensionTranslator.translate
 
 object ComprehensionTranslator {
   import AST._
@@ -125,8 +124,8 @@ object ComprehensionTranslator {
     }
   }
 
-  def lift_array_expr ( v: String ): Expr
-    = typecheck_var(v) match {
+  def lift_array_expr ( v: String, tp: Option[Type] ): Expr
+    = tp match {
               case Some(BasicType("edu.uta.array.Matrix"))
                 => val i = newvar
                    val j = newvar
@@ -149,7 +148,7 @@ object ComprehensionTranslator {
 
   def translate_comprehension ( hs: List[Expr], qs: List[Qualifier] ): (List[Expr],List[Qualifier]) = {
     val (nhs,nqs) = translate_groupbys(hs,qs)
-    val nqs2 = nqs.map{ case Generator(p,Var(v)) => Generator(p,lift_array_expr(v)); case x => x }
+    val nqs2 = nqs.map{ case Generator(p,Var(v)) => Generator(p,lift_array_expr(v,typecheck_var(v))); case x => x }
     (nhs,nqs2)
   }
 
@@ -227,20 +226,40 @@ object ComprehensionTranslator {
                               ++ List(Comprehension(Nil,
                                           nqs :+ AssignQual(MapAccess(Var(rv),Var(kv)),ne)),Var(rv))))
            }
-      case Call("Array",List(Var(nv),Comprehension(hs,qs)))
+      case Call("array",List(Lambda(VarPat(nv),c@Comprehension(List(_),_)),u))
         if optimize
-        => val (nhs,nqs) = translate_comprehension(hs,qs)
-           val vs = nhs.map( x => (newvar,newvar) )
-           val ls = (nhs zip vs).map{ case (h,(k,v)) => LetBinding(TuplePat(List(VarPat(k),VarPat(v))),h) }
-           val nr = nqs ++ ls :+ AssignQual(Tuple(vs.map{ case (k,_) => MapAccess(Var(nv),Var(k)) }),
-                                            Tuple(vs.map{ case (_,v) => Var(v) }))
-           translate(Block(List(Comprehension(Nil,nr),Var(nv))))
+        => subst(nv,lift_array_expr(nv,typecheck_expr(u)),c) match {
+              case Comprehension(hs,qs)
+                => val (List(h),nqs) = translate_comprehension(hs,qs)
+                   val k = newvar
+                   val v = newvar
+                   val nr = nqs :+ LetBinding(TuplePat(List(VarPat(k),VarPat(v))),h) :+
+                                   AssignQual(MapAccess(Var(nv),Var(k)),Var(v))
+                   translate(Block(List(VarDecl(nv,MethodCall(u,"clone",null)),
+                                        Comprehension(Nil,nr),Var(nv))))
+              case _ => e
+           }
+      case Call("array",List(Lambda(VarPat(nv),c@Comprehension(_,_)),u))
+        if optimize
+        => subst(nv,lift_array_expr(nv,typecheck_expr(u)),c) match {
+              case Comprehension(hs,qs)
+                => val (nhs,nqs) = translate_comprehension(hs,qs)
+                   val vs = nhs.map( x => (newvar,newvar) )
+                   val ls = (nhs zip vs).map{ case (h,(k,v)) => LetBinding(TuplePat(List(VarPat(k),VarPat(v))),h) }
+                   val nr = nqs ++ ls :+ AssignQual(Tuple(vs.map{ case (k,_) => MapAccess(Var(nv),Var(k)) }),
+                                                    Tuple(vs.map{ case (_,v) => Var(v) }))
+                   translate(Block(List(VarDecl(nv,MethodCall(u,"clone",null)),
+                                        Comprehension(Nil,nr),Var(nv))))
+              case _ => e
+           }
       case reduce(op,Comprehension(hs,qs))
         if optimize
         => val (nhs,nqs) = translate_comprehension(hs,qs)
            val nv = newvar
            val nr = nqs ++ nhs.map { case h => AssignQual(Var(nv),MethodCall(Var(nv),op,List(h))) }
-           translate(Block(List(VarDecl(nv,IntConst(0)),
+           val zero = op match { case "+" => IntConst(0); case "*" => IntConst(1)
+                                 case "&&" => BoolConst(true); case "||" => BoolConst(false) }
+           translate(Block(List(VarDecl(nv,zero),
                                 Comprehension(Nil,nr),Var(nv))))
       case Call(array,List(Tuple(d),Comprehension(hs,qs)))
         if optimize

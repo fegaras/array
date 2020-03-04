@@ -15,7 +15,7 @@ object Test {
 
     ar("""
 
-       Array(n,m)[ (+/v / v.length)[I,J]
+       array(n,m)[ (+/v / v.length)[I,J]
                  | v[i,j] <- M,
                    I <- (i-1) to (i+1),
                    J <- (j-1) to (j+1),

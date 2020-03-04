@@ -17,14 +17,59 @@ package edu.uta
 
 import scala.reflect.macros.whitebox.Context
 import scala.language.experimental.macros
-
+import scala.reflect.ClassTag
 import array.Parser.parse
 import array.Translator.translate
+
+import scala.collection.mutable
 
 package object array {
 
   var optimize = true
   var trace = true
+
+  def array[T: ClassTag] ( length: Int ) ( values: List[(Int,T)] ): Array[T] = {
+    val a = Array.ofDim[T](length)
+    for { (i,v) <- values }
+        if (i>=0 && i<length)
+           a(i) = v
+    a
+  }
+
+  def array[T: ClassTag] ( rows: Int, cols: Int ) ( values: List[((Int,Int),T)] ): Array[Array[T]] = {
+    val a = Array.ofDim[T](rows,cols)
+    for { ((i,j),v) <- values }
+        if (i>=0 && i<rows && j>=0 && j<cols)
+           a(i)(j) = v
+    a
+  }
+
+  def map[K,V] ( s: List[(K,V)] ): mutable.Map[K,V] = {
+    val m = mutable.HashMap[K,V]()
+    for { (k,v) <- s }
+        m += (k -> v)
+    m
+  }
+
+  def array[T] ( a: Array[T] ) ( values: List[(Int,T)] ): Array[T] = {
+    for { (i,v) <- values }
+        if (i>=0 && i<a.length)
+           a(i) = v
+    a
+  }
+
+  def array[T] ( a: Array[Array[T]] ) ( values: List[((Int,Int),T)] ): Array[Array[T]] = {
+    for { ((i,j),v) <- values }
+        if (i>=0 && i<a.length && j>=0 && j<a(i).length)
+           a(i)(j) = v
+    a
+  }
+
+  def map[K,V] ( m: mutable.Map[K,V] ) ( s: List[(K,V)] ): mutable.Map[K,V] = {
+    for { (k,v) <- s }
+        m += (k -> v)
+    m
+  }
 
   def translate_query ( query: String ): Expr = {
     val q = parse(query)

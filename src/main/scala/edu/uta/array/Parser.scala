@@ -143,6 +143,8 @@ object Parser extends StandardTokenParsers {
           { case n~_~List(v@Var(_))~_~Some(c) => Call(n,List(v,c))
             case n~_~el~_~Some(c) => Call(n,List(Tuple(el),c))
             case n~_~es~_~None => Call(n,es) }
+        | ident ~ "{" ~ ident ~ "=>" ~ compr ~ "}" ~ expr ^^
+          { case n~_~v~_~c~_~e => Call(n,List(Lambda(VarPat(v),c),e)) }
         | "if" ~ "(" ~ expr ~ ")" ~ expr ~ "else" ~ expr ^^
           { case _~_~p~_~t~_~e => IfE(p,t,e) }
         | "new" ~> ident ~ opt( "(" ~> repsep( expr, "," ) <~ ")" ) ^^

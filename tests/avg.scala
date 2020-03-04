@@ -12,11 +12,11 @@ object Test {
 
     val x = ar("""
 
-       Array(10)[ (k,(+/v)/v.length) | v[i] <- V, group by k: (v%10) ]
+       array(10)[ (k,(+/v)/v.length) | v[i] <- V, group by k: (v%10) ]
 
        """)
 
-    println(x)
+    println(x.length)
 
   }
 }

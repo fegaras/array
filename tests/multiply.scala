@@ -16,10 +16,21 @@ object Test {
     var t: Long = System.currentTimeMillis()
 
     ar("""
-       Array(n,n)[ (+/v)[i,j] | m[i,k] <- M, n[kk,j] <- N, v = m*n, k == kk, group by (i,j) ]
+       array(n,n)[ (+/v)[i,j] | m[i,k] <- M, n[kk,j] <- N, v = m*n, k == kk, group by (i,j) ]
     """)
 
     println("**** run time: "+(System.currentTimeMillis()-t)/1000.0+" secs")
 
+    t = System.currentTimeMillis()
+
+    Array.tabulate(n,n){ case (i,j) => (0 until n).map{ k => M(i)(k)*N(k)(j) }.reduce(_+_) }
+
+    println("**** run time: "+(System.currentTimeMillis()-t)/1000.0+" secs")
+
+    t = System.currentTimeMillis()
+
+    Array.tabulate(n,n){ case (i,j) => (0 until n).foldLeft[Double](0.0){ (r,k) => r+M(i)(k)*N(k)(j) } }
+
+    println("**** run time: "+(System.currentTimeMillis()-t)/1000.0+" secs")
   }
 }

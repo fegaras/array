@@ -14,7 +14,7 @@ object Test {
     var t: Long = System.currentTimeMillis()
 
     ar("""
-       Array(n,n)[ (m+n)[i,j] | m[i,j] <- M, n[ii,jj] <- N, ii == i, jj == j ]
+       array(n,n)[ (m+n)[i,j] | m[i,j] <- M, n[ii,jj] <- N, ii == i, jj == j ]
     """)
 
     println("**** run time: "+(System.currentTimeMillis()-t)/1000.0+" secs")

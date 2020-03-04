@@ -1,0 +1,9 @@
+#/bin/bash
+
+AHOME="$(cd `dirname $0`/..; pwd -P)"
+
+jar cf test.jar -C classes .
+
+for cores in 1 2 4 8 12 16; do
+   scala -cp ${AHOME}/lib/array.jar:test.jar -J-Xmx16G -J-Xms16G -J-Xss128M -J-XX:ActiveProcessorCount=$cores Test $*
+done

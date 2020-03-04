@@ -297,9 +297,9 @@ abstract class CodeGeneration {
            q"$xc.$nc"
       case Tuple(es)
         => codeList(es,cs => q"(..$cs)",env)
-      case Call("Map",Nil)
+      case Call("map",Nil)
         => q"scala.collection.mutable.Map[Any,Any]()"
-      case Call("Array",d)
+      case Call("array",d)
         => val dc = d.map(codeGen(_,env))
            q"Array.ofDim[Any](..$dc)"
       case Call(n,es)
@@ -393,13 +393,13 @@ abstract class CodeGeneration {
            val stmts = s.flatMap{ case VarDecl(_,_) => Nil; case x => List(codeGen(x,nenv)) }
            val decls = s.flatMap{ case x@VarDecl(_,_) => List(codeGen(x,nenv)); case x => Nil }
            q"{ ..$decls; ..$stmts }"
-      case VarDecl(v,Call("Map",Nil))
+      case VarDecl(v,Call("map",Nil))
         => val vc = TermName(v)
            if (var_decls.contains(v)) {
               val tq"Map[$kt,$vt]" = var_decls(v)
               q"val $vc = collection.mutable.Map[$kt,$vt]()"
            } else q"val $vc = collection.mutable.Map[Any,Any]()"
-      case VarDecl(v,Call("Array",d))
+      case VarDecl(v,Call("array",d))
         => val vc = TermName(v)
            val dc = d.map(codeGen(_,env))
            val etp = if (var_decls.contains(v)) element_type(var_decls(v)) else tq"Any"

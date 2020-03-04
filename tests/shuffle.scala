@@ -8,17 +8,18 @@ object Test {
   def main ( args: Array[String] ) {
     //val n = args(0).toInt
 
-    //val V = Array.tabulate(n){ i => rand.nextDouble() }
-    val V = Array(5,3,4,1,6,8)
+    //val A = Array.tabulate(n){ i => rand.nextDouble() }
+    val A = Array(5,3,4,1,6,8)
 
     def random ( n: Int ) = Math.abs(rand.nextInt())% n
 
     val x = ar("""
 
-       Array(V)[ v[j], w[i] | v[i] <- V, w[j] <- V, j==random(V.length) ]
+       array{ V => [ v[j], w[i] | v[i] <- V, w[j] <- V, j==random(V.length) ] } A
 
        """)
-x.foreach(println)
+
+    x.foreach(println)
 
   }
 }

@@ -8,11 +8,12 @@ object Test {
   def main ( args: Array[String] ) {
     val n = args(0).toInt
 
-    val V = Array.tabulate(n){ i => Math.abs(rand.nextInt()) % 1000 }
+    val A = Array.tabulate(n){ i => Math.abs(rand.nextInt()) % 1000 }
 
     val x = ar("""
 
-       Array(V)[ v[j], w[i] | v[i] <- V, w[j] <- V, i<j, v>w ]
+       //array(V)[ v[j], w[i] | v[i] <- V, w[j] <- V, i<j, v>w ]
+       array{ V => [ v[j], w[i] | v[i] <- V, w[j] <- V, i<j, v>w ] } A
 
        """)
 
