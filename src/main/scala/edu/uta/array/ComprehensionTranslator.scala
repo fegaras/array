@@ -19,6 +19,24 @@ package edu.uta.array
 object ComprehensionTranslator {
   import AST._
 
+  /* general span for comprehensions; if a qualifier matches, split there and continue with cont */
+  def matchQ ( qs: List[Qualifier], filter: Qualifier => Boolean,
+               cont: List[Qualifier] => Option[List[Qualifier]] ): Option[List[Qualifier]]
+    = qs match {
+        case q::r
+          if filter(q)
+          => cont(qs) match {
+               case r@Some(s) => r
+               case _ => matchQ(r,filter,cont)
+             }
+        case _::r
+          => matchQ(r,filter,cont)
+        case _ => None
+      }
+
+  def tuple ( s: List[Expr] ): Expr
+    = s match { case List(x) => x; case _ => Tuple(s) }
+
   def comprVars ( qs: List[Qualifier] ): List[String]
     = qs.flatMap {
         case Generator(p,_) => patvars(p)
@@ -124,33 +142,57 @@ object ComprehensionTranslator {
     }
   }
 
-  def lift_array_expr ( v: String, tp: Option[Type] ): Expr
+  def lift_array_expr ( u: Expr, tp: Option[Type] ): Expr
     = tp match {
-              case Some(BasicType("edu.uta.array.Matrix"))
-                => val i = newvar
-                   val j = newvar
-                   Comprehension(List(Tuple(List(Tuple(List(Var(i),Var(j))),
-                                            MapAccess(Var(v),Tuple(List(Var(i),Var(j))))))),
-                      List(Generator(VarPat(i),
-                                     MethodCall(IntConst(0),"until",
-                                                List(MethodCall(Var(v),"rows",null)))),
-                           Generator(VarPat(j),
-                                     MethodCall(IntConst(0),"until",
-                                                List(MethodCall(Var(v),"cols",null))))))
-              case Some(tp@ParametricType("Array",_))
-                => val gs = array_generators(Var(v),tp)
-                   val is = if (gs.length == 1) Var(gs.head._1) else Tuple(gs.map(x => Var(x._1)))
-                   val mas = gs.foldLeft[Expr](Var(v)){ case (r,(w,_)) => MapAccess(r,Var(w)) }
-                   Comprehension(List(Tuple(List(is,mas))),
-                                 gs.map(_._2))
-              case _ => Var(v)
-           }
+          case Some(BasicType("edu.uta.array.Matrix"))
+            => val i = newvar
+               val j = newvar
+               Comprehension(List(Tuple(List(Tuple(List(Var(i),Var(j))),
+                                        MapAccess(u,Tuple(List(Var(i),Var(j))))))),
+                  List(Generator(VarPat(i),
+                                 MethodCall(IntConst(0),"until",
+                                            List(MethodCall(u,"rows",null)))),
+                       Generator(VarPat(j),
+                                 MethodCall(IntConst(0),"until",
+                                            List(MethodCall(u,"cols",null))))))
+          case Some(tp@ParametricType("Array",_))
+            => val gs = array_generators(u,tp)
+               val is = if (gs.length == 1) Var(gs.head._1) else Tuple(gs.map(x => Var(x._1)))
+               val mas = gs.foldLeft[Expr](u){ case (r,(w,_)) => MapAccess(r,Var(w)) }
+               Comprehension(List(Tuple(List(is,mas))),
+                             gs.map(_._2))
+          case _ => u
+       }
 
   def translate_comprehension ( hs: List[Expr], qs: List[Qualifier] ): (List[Expr],List[Qualifier]) = {
     val (nhs,nqs) = translate_groupbys(hs,qs)
-    val nqs2 = nqs.map{ case Generator(p,Var(v)) => Generator(p,lift_array_expr(v,typecheck_var(v))); case x => x }
+    val nqs2 = nqs.map{ case Generator(p,u@Var(v))
+                          => Generator(p,lift_array_expr(u,typecheck_var(v)))
+                        case x@Generator(p,u)
+                          => try {
+                               Generator(p,lift_array_expr(u,typecheck_expr(u)))
+                          } catch { case _ : Throwable => x }
+                        case x => x }
     (nhs,nqs2)
   }
+
+  def isRDD ( e: Expr ): Boolean
+    = e match {
+        case Var(v)
+          => typecheck_var(v) match {
+                case Some(ParametricType("org.apache.spark.rdd.RDD",List(_)))
+                  => true
+                case _ => false
+             }
+        case _
+          => try {
+                typecheck_expr(e) match {
+                  case Some(ParametricType("org.apache.spark.rdd.RDD",List(_)))
+                    => true
+                  case _ => false
+                }
+          } catch { case _ : Throwable => false }
+      }
 
   def array_generators ( e: Expr, tp: Type ): List[(String,Qualifier)]
     = tp match {
@@ -162,6 +204,100 @@ object ComprehensionTranslator {
                    array_generators(MapAccess(e,Var(i)),atp)
         case _ => Nil
       }
+
+  def seq ( e: Expr, s: Set[String] ): Boolean = {
+    val r = freevars(e).toSet
+    r == s || r.subsetOf(s)
+  }
+
+  /* finds a sequence of predicates in qs that imply x=y */
+  def findEqPred ( xs: Set[String], ys: Set[String], qs: List[Qualifier] ): Option[List[Qualifier]]
+    = matchQ(qs,{ case Predicate(MethodCall(e1,"==",List(e2)))
+                    => ((seq(e1,xs) && seq(e2,ys)) || (seq(e2,xs) && seq(e1,ys)))
+                  case _ => false },
+                { case (p::s)
+                    => findEqPred(xs,ys,s) match {
+                          case None => Some(List(p))
+                          case Some(r) => Some(p::r)
+                       }
+                  case _ => None })
+
+  /* matches ...,p1 <- e1,...,p2 <- e2,...,e3 == e4,...   */
+  def findJoin ( qs: List[Qualifier] ): Option[List[Qualifier]]
+    = matchQ(qs,{ case Generator(_,e1) if isRDD(e1) => true; case _ => false },
+                { case (g1@Generator(p1,e1))::r1
+                    => matchQ(r1,{ case Generator(_,e2) if isRDD(e2) => true; case _ => false },
+                                 { case (g2@Generator(p2,e2))::r2
+                                     => for { c <- findEqPred(patvars(p1).toSet,patvars(p2).toSet,r2)
+                                            } yield g1::g2::c
+                                  case _ => None })
+                  case _ => None })
+
+  @scala.annotation.tailrec
+  def rdd_reducebykey ( hs: List[Expr], qs: List[Qualifier] ): (List[Expr],List[Qualifier])
+    = qs.span{ case GroupByQual(_,_) => false; case _ => true } match {
+              case (r,GroupByQual(p,k)::s)
+                => val groupByVars = patvars(p)
+                   val usedVars = freevars(Comprehension(hs,s),groupByVars)
+                                              .intersect(comprVars(r)).distinct
+                   val rt = findReducedTerms(yieldReductions(Comprehension(hs,s),usedVars),
+                                             usedVars)
+                   val gs = rt.map(_._2)
+                              .map{ case reduce(_,Var(v))
+                                      => Var(v)
+                                    case reduce(_,flatMap(Lambda(p,Sequence(List(u))),Var(v)))
+                                      => Apply(Lambda(p,u),Var(v))
+                                    case reduce(_,MethodCall(Var(v),"flatMap",List(Lambda(p,Sequence(List(u))))))
+                                      => Apply(Lambda(p,u),Var(v))
+                                    case reduce(_,MethodCall(Var(v),"map",List(g)))
+                                      => Apply(g,Var(v))
+                                    case e
+                                      => Sequence(List(e))
+                                  }
+                   val ms = rt.map{ case (_,reduce(m,_)) => m
+                                    case (_,_) => "++"
+                                  }
+                   val m = if (ms.length == 1)
+                              Lambda(TuplePat(List(VarPat("x"),VarPat("y"))),
+                                     MethodCall(Var("x"),ms.head,List(Var("y"))))
+                           else { val xs = rt.map(_ => newvar)
+                                  val ys = rt.map(_ => newvar)
+                                  Lambda(TuplePat(List(TuplePat(xs.map(VarPat)),
+                                                       TuplePat(ys.map(VarPat)))),
+                                         Tuple((ms zip (xs zip ys))
+                                                 .map{ case (m,(x,y))
+                                                         => MethodCall(Var(x),m,List(Var(y))) }))
+                                }
+                   val env = rt.map{ case (n,e) => (e,newvar) }
+                   def lift ( x: Expr ): Expr
+                     = env.foldLeft(x) { case (r,(from,to)) => AST.subst(from,Var(to),r) }
+                   val Comprehension(nhs,ns) = lift(Comprehension(hs,s))
+                   val red = MethodCall(Call("rdd",List(Comprehension(List(Tuple(List(toExpr(p),Tuple(gs)))),r))),
+                                        "reduceByKey",List(m))
+                   rdd_reducebykey(nhs,Generator(TuplePat(List(p,TuplePat(env.map(x => VarPat(x._2))))),
+                                                 red)::ns)
+              case _
+                => findJoin(qs) match {
+                     case Some((g1@Generator(p1,d1))::(g2@Generator(p2,d2))::cs)
+                       => val jt1 = tuple(cs.map{ case Predicate(MethodCall(e1,"==",List(e2)))
+                                                    => if (seq(e1,patvars(p1).toSet)) e1 else e2
+                                                  case _ => d1 })
+                          val jt2 = tuple(cs.map{ case Predicate(MethodCall(e1,"==",List(e2)))
+                                                    => if (seq(e1,patvars(p2).toSet)) e1 else e2
+                                                  case _ => d1 })
+                          val left = flatMap(Lambda(p1,Sequence(List(Tuple(List(jt1,toExpr(p1)))))),d1)
+                          val right = flatMap(Lambda(p2,Sequence(List(Tuple(List(jt2,toExpr(p2)))))),d2)
+                          val z = Generator(TuplePat(List(p1,p2)),
+                                            flatMap(Lambda(TuplePat(List(VarPat("_k"),VarPat("x"))),
+                                                           Sequence(List(Var("x")))),
+                                                    MethodCall(left,"join",List(right))))
+                          rdd_reducebykey(hs,qs.flatMap(x => if (x == g1) List(z)
+                                                             else if (x == g2 || cs.contains(x)) Nil
+                                                             else List(x)))
+                     case _ 
+                       =>  (hs,qs)
+                   }
+    }
 
   def translate ( e: Expr ): Expr = {
     e match {
@@ -186,7 +322,6 @@ object ComprehensionTranslator {
            val env = reducedTerms.map{ case (v,t) => (t,MapAccess(Var(v),Var(kv))) } ++
                                liftedVars.map(v => (Var(v),Comprehension(List(Var(v)),
                                                       List(Generator(lp,MapAccess(Var(xv),Var(kv)))))))
-//println("@@@ "+rt+"     "+reducedTerms+"       "+env)
            val le = liftedVars match {
                               case List(v)
                                 => Var(v)
@@ -228,7 +363,7 @@ object ComprehensionTranslator {
            }
       case Call("array",List(Lambda(VarPat(nv),c@Comprehension(List(_),_)),u))
         if optimize
-        => subst(nv,lift_array_expr(nv,typecheck_expr(u)),c) match {
+        => subst(nv,lift_array_expr(Var(nv),typecheck_expr(u)),c) match {
               case Comprehension(hs,qs)
                 => val (List(h),nqs) = translate_comprehension(hs,qs)
                    val k = newvar
@@ -241,7 +376,7 @@ object ComprehensionTranslator {
            }
       case Call("array",List(Lambda(VarPat(nv),c@Comprehension(_,_)),u))
         if optimize
-        => subst(nv,lift_array_expr(nv,typecheck_expr(u)),c) match {
+        => subst(nv,lift_array_expr(Var(nv),typecheck_expr(u)),c) match {
               case Comprehension(hs,qs)
                 => val (nhs,nqs) = translate_comprehension(hs,qs)
                    val vs = nhs.map( x => (newvar,newvar) )
@@ -291,10 +426,14 @@ object ComprehensionTranslator {
                                            translate(c)),
                                  AssignQual(MapAccess(Var(v),Tuple(is.map(Var))),Var("v")))),
                       Var(v))))
+      case Call("rdd",List(Comprehension(hs,qs)))
+        if optimize
+        => val (nhs,nqs) = rdd_reducebykey(hs,qs)
+           return apply(Comprehension(nhs,nqs),translate)
       case Comprehension(result,qs)
         if optimize
-        => val (nh,nqs) = translate_comprehension(result,qs)
-           apply(Comprehension(nh,nqs),translate)
+        => val (nhs,nqs) = translate_comprehension(result,qs)
+           apply(Comprehension(nhs,nqs),translate)
       case _ => apply(e,translate)
     }
   }

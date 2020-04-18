@@ -127,7 +127,13 @@ abstract class CodeGeneration {
           => try {
                 val ctp = c.Expr[Any](c.typecheck(q"(x:$atp) => x.head")).actualType
                 Some(returned_type(type2tree(ctp)))
-             } catch { case ex: TypecheckException => return None }
+             } catch { case ex: TypecheckException
+                         => try {
+                               val ctp = c.Expr[Any](c.typecheck(q"(x:$atp) => x.first()")).actualType
+                               Some(returned_type(type2tree(ctp)))
+                            } catch { case ex: TypecheckException
+                                 => return None }
+                     }
         case Right(_) => None
       }
 

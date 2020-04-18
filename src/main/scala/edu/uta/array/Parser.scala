@@ -130,7 +130,8 @@ object Parser extends StandardTokenParsers {
   def factor: Parser[Expr]
       = term ~ rep( opt( "." ) ~ ident ~ opt( "(" ~> repsep( expr, "," ) <~ ")"
                                             | expr ^^ { (x:Expr) => List(x) } ) ) ^^
-        { case a~as => as.foldLeft(a){ case (r,_~n~Some(xs)) => MethodCall(r,n,xs)
+        { case a~as => as.foldLeft(a){ case (r,_~"reduce"~Some(List(Var(op)))) => reduce(op,r)
+                                       case (r,_~n~Some(xs)) => MethodCall(r,n,xs)
                                        case (r,_~n~_) => MethodCall(r,n,null) } }
 
   def compr: Parser[Comprehension]
@@ -143,6 +144,8 @@ object Parser extends StandardTokenParsers {
           { case n~_~List(v@Var(_))~_~Some(c) => Call(n,List(v,c))
             case n~_~el~_~Some(c) => Call(n,List(Tuple(el),c))
             case n~_~es~_~None => Call(n,es) }
+        | ident ~ compr ^^
+          { case n~c => Call(n,List(c)) }
         | ident ~ "{" ~ ident ~ "=>" ~ compr ~ "}" ~ expr ^^
           { case n~_~v~_~c~_~e => Call(n,List(Lambda(VarPat(v),c),e)) }
         | "if" ~ "(" ~ expr ~ ")" ~ expr ~ "else" ~ expr ^^
