@@ -166,8 +166,10 @@ object ComprehensionTranslator {
 
   def translate_comprehension ( hs: List[Expr], qs: List[Qualifier] ): (List[Expr],List[Qualifier]) = {
     val (nhs,nqs) = translate_groupbys(hs,qs)
-    val nqs2 = nqs.map{ case Generator(p,u@Var(v))
-                          => Generator(p,lift_array_expr(u,typecheck_var(v)))
+    val nqs2 = nqs.map{ case x@Generator(p,u@Var(v))
+                          => try {
+                               Generator(p,lift_array_expr(u,typecheck_var(v)))
+                          } catch { case _ : Throwable => x }
                         case x@Generator(p,u)
                           => try {
                                Generator(p,lift_array_expr(u,typecheck_expr(u)))

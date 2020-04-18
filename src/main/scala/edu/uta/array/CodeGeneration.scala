@@ -243,12 +243,12 @@ abstract class CodeGeneration {
   def mapAccess ( x: Expr, i: Expr, env: Environment ): c.Tree = {
     val xc = codeGen(x,env)
     val ic = codeGen(i,env)
-    (getType(xc,env),ic,getType(ic,env)) match {
-      case (tq"edu.uta.array.Matrix",q"($i,$j)",_)
+    (getOptionalType(xc,env),ic,getOptionalType(ic,env)) match {
+      case (Left(tq"edu.uta.array.Matrix"),q"($i,$j)",_)
         => q"$xc($i,$j)"
-      case (tq"Array[$t]",q"(..$is)",_)
+      case (Left(tq"Array[$t]"),q"(..$is)",_)
         => is.foldLeft[c.Tree](xc) { case (r,n) => q"$r($n)" }
-      case (tq"Array[$t]",_,tq"(..$its)")
+      case (Left(tq"Array[$t]"),_,Left(tq"(..$its)"))
         if its.length > 1
         => val as = (1 to its.length).foldLeft[c.Tree](xc) {
                           case (r,n) => val v = TermName("_"+n); q"$r(k.$v)"
