@@ -1,11 +1,11 @@
 #!/bin/bash
-#SBATCH -A uot143
+#SBATCH -A uot166
 #SBATCH --job-name="array"
 #SBATCH --output="run.log"
 #SBATCH --partition=compute
 #SBATCH --nodes=4
 #SBATCH --export=ALL
-#SBATCH --time=60    # time limit in minutes
+#SBATCH --time=120    # time limit in minutes
 
 nodes=$SLURM_NNODES
 echo "Number of nodes = " $nodes
@@ -29,13 +29,9 @@ ARRAY_HOME=$SW/array
 
 export JAVA_HOME=/lib/jvm/java
 
-if [ -z ${SCALA_HOME} ]; then
-   export SCALA_HOME=$SW/scala-2.11.8
-fi
+export SCALA_HOME=$SW/scala-2.12.3
 
-if [ -z ${SPARK_HOME} ]; then
-   export SPARK_HOME=$SW/spark-2.2.0-bin-hadoop2.6
-fi
+export SPARK_HOME=$SW/spark-3.0.0-bin-hadoop2.7
 
 myhadoop-configure.sh
 source $HOME/cometcluster/spark/spark-env.sh
@@ -53,7 +49,7 @@ done
 rm -rf classes
 mkdir -p classes
 
-scala_files="tiles.scala"
+scala_files="add-tile.scala multiply-tile.scala factorization.scala"
 for f in $scala_files; do
     echo compiling $f ...
     $SCALA_HOME/bin/scalac -d classes -cp classes:${JARS}:${ARRAY_HOME}/lib/array.jar $f
@@ -66,24 +62,11 @@ scale=100   # scale of datasets
 ns=5        # number of datasets per experiment
 repeat=1    # number of repetitions of each experiment
 
-tile_size=1000
-
-for tile_size in 10000; do
 for ((i=$ns; i<=$ns; i++)); do   # for each different dataset
 
-   j=$(echo "scale=3;sqrt($i/$ns)*100*$scale" | bc); n=${j%.*}
-      $SPARK_HOME/bin/spark-submit --jars ${ARRAY_HOME}/lib/array.jar --class Tiles --master $MASTER $SPARK_OPTIONS test.jar 2 $repeat $n $tile_size
+   j=$(echo "scale=3;sqrt($i/$ns)*200*$scale" | bc); n=${j%.*}
+      $SPARK_HOME/bin/spark-submit --jars ${ARRAY_HOME}/lib/array.jar --class Multiply --master $MASTER $SPARK_OPTIONS test.jar $repeat $n 1
 
-   j=$(echo "scale=3;sqrt($i/$ns)*100*$scale" | bc); n=${j%.*}
-      $SPARK_HOME/bin/spark-submit --jars ${ARRAY_HOME}/lib/array.jar --class Tiles --master $MASTER $SPARK_OPTIONS test.jar 3 $repeat $n $tile_size
-
-   j=$(echo "scale=3;sqrt($i/$ns)*100*$scale" | bc); n=${j%.*}
-      $SPARK_HOME/bin/spark-submit --jars ${ARRAY_HOME}/lib/array.jar --class Tiles --master $MASTER $SPARK_OPTIONS test.jar 5 $repeat $n $tile_size
-
-   j=$(echo "scale=3;sqrt($i/$ns)*100*$scale" | bc); n=${j%.*}
-      $SPARK_HOME/bin/spark-submit --jars ${ARRAY_HOME}/lib/array.jar --class Tiles --master $MASTER $SPARK_OPTIONS test.jar 6 $repeat $n $tile_size
-
-done
 done
 
 $SPARK_HOME/sbin/stop-all.sh

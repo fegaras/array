@@ -13,7 +13,7 @@ object Test {
     var t: Long = System.currentTimeMillis()
 
     ar("""
-       Matrix(n,n)[ (+/v)[i,j] | m[i,k] <- M, n[kk,j] <- N, v = m*n, k == kk, group by (i,j) ]
+       matrix(n,n)[ (+/v)[i,j] | m[i,k] <- M, n[kk,j] <- N, v = m*n, k == kk, group by (i,j) ]
     """)
 
     println("**** run time: "+(System.currentTimeMillis()-t)/1000.0+" secs")

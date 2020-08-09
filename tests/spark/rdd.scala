@@ -10,17 +10,30 @@ object Test {
     val conf = new SparkConf().setAppName("rdd")
     val sc = new SparkContext(conf)
 
+    val P = sc.parallelize(1 to 100)
     val R = sc.parallelize(1 to 100)
 
-    val S = ar("""
-       //rdd[ i+j | i <- R, j <- R, i == j ]
+    val S = sc.parallelize((1 to 100).map( i => (i,i*10.0) ))
+    val T = sc.parallelize((1 to 100).map( i => (i,i*10.0) ))
+    val Q = sc.parallelize((1 to 100).map( i => (i,i*10.0) ))
 
-       rdd[ (k,+/i) | i <- R, k = i%10, group by k ]
+    val X = ar("""
+       //rdd[ i+j | i <- P, j <- R, i == j ]
 
-       // nested => error: rdd[ (i,+/[ j | j <- R, i%10 == j%10 ]) | i <- R ]
+       rdd[ (i,a+1) | (i,a) <- S ]
+
+       //rdd[ (i,a+b) | (i,a) <- S, (j,b) <- T, i == j ]
+
+       //rdd[ (i,+/a,+/b) | (i,a) <- S, (j,b) <- T, i == j, group by i ]
+
+       //rdd[ (i,a+b*c) | (i,a) <- S, (j,b) <- T, (l,c) <- Q, i == j, l == i ]
+
+       //rdd[ (k,+/i,*/i) | i <- R, k = i%10, group by k ]
+
+       // nested RDD foreach: rdd[ (i,+/[ j | j <- R, i%10 == j%10 ]) | i <- R ]
     """)
 
-    S.foreach(println)
+    X.foreach(println)
 
   }
 }

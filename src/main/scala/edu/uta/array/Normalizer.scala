@@ -50,6 +50,8 @@ object Normalizer {
 
   def bindEnv ( p: Pattern, e: Expr ): Map[String,Expr] =
     (p,e) match {
+      case (TuplePat(Nil),_)
+        => Map()
       case (TuplePat(ps),Tuple(ts))
         => (ps zip ts).map{ case (q,x) => bindEnv(q,x) }.reduce(_++_)
       case (TuplePat(ps),u)
@@ -92,7 +94,7 @@ object Normalizer {
   def canInline ( p: Pattern, hds: Expr, qs: List[Qualifier] ): Boolean
     = qs match {
         case GroupByQual(gp,_)::r
-          if gp == p
+          if p == gp
           => canInline(p,hds,r)
         case GroupByQual(_,_)::r
           => patvars(p).map( s => occurrences(s,Comprehension(List(hds),r)) ).sum == 0
@@ -106,67 +108,82 @@ object Normalizer {
         case _ => accumulate[Boolean](e,pure,_&&_,true)
       }
 
+  def renameVars ( hds: List[Expr], qs: List[Qualifier], env: Map[String,String] ): List[Qualifier] = {
+    def nenv ( p: Pattern ): Map[String,String]
+      = env ++ patvars(p).map(_ -> newvar).toMap
+    def subst ( e: Expr ): Expr
+      = substE(e,env.mapValues(Var(_)))
+    qs match {
+      case Nil
+        => hds.map(x => Predicate(subst(x)))
+      case Generator(p,u)::r
+        => val ne = nenv(p)
+           Generator(substP(p,ne),subst(u))::renameVars(hds,r,ne)
+      case LetBinding(p,u)::r
+        => val ne = nenv(p)
+           LetBinding(substP(p,ne),subst(u))::renameVars(hds,r,ne)
+      case GroupByQual(p,u)::r
+        => val ne = nenv(p)
+           GroupByQual(substP(p,ne),subst(u))::renameVars(hds,r,ne)
+      case VarDef(v,u)::r
+        => val ne = nenv(VarPat(v))
+           VarDef(ne(v),subst(u))::renameVars(hds,r,ne)
+      case Predicate(u)::r
+        => Predicate(subst(u))::renameVars(hds,r,env)
+      case AssignQual(d,v)::r
+        => AssignQual(subst(d),subst(v))::renameVars(hds,r,env)
+    }
+  }
+
   def renameVars ( e: Comprehension ): Comprehension
     = e match {
         case Comprehension(hds,qs)
-          => val vs = comprVars(qs)
-             val env = vs.map(_ -> newvar).toMap
-             val enve = env.map{ case (v,w) => (v,Var(w)) }
-             val nqs = qs.map {
-                          case Generator(p,u)
-                            => Generator(substP(p,env),substE(u,enve))
-                          case LetBinding(p,u)
-                            => LetBinding(substP(p,env),substE(u,enve))
-                          case GroupByQual(p,k)
-                            => GroupByQual(substP(p,env),substE(k,enve))
-                          case Predicate(u)
-                            => Predicate(substE(u,enve))
-                          case AssignQual(d,v)
-                            => AssignQual(substE(d,enve).asInstanceOf[MapAccess],substE(v,enve))
-                          case VarDef(v,u)
-                            => VarDef(v,substE(u,enve))
-                       }
-             Comprehension(hds.map(substE(_,enve)),nqs)
+          => val nqs:+Predicate(nhds) = renameVars(hds,qs,Map())
+             Comprehension(List(nhds),nqs)
       }
 
   def empty () = Sequence(Nil)
   def elem ( x: Expr ) = Sequence(List(x))
 
   /** Normalize a comprehension */
-  def normalize ( head: Expr, qs: List[Qualifier], env: Map[String,Expr] ): List[Qualifier] =
+  def normalize ( hds: List[Expr], qs: List[Qualifier], env: Map[String,Expr] ): List[Qualifier] =
     qs match {
       case Nil
-        => List(LetBinding(VarPat("@result"),substE(head,env)))
+        => List(LetBinding(VarPat("@result"),
+                           Tuple(hds.map(x => substE(x,env)))))
       case Generator(p,Sequence(List(u)))::r
-        => normalize(head,LetBinding(p,u)::r,env)
+        => normalize(hds,LetBinding(p,u)::r,env)
       case Generator(_,Sequence(Nil))::_
         => Nil
       case Generator(p,c@Comprehension(List(_),s))::r
         if canInline(s)
-        => val Comprehension(List(hd),s) = renameVars(c)
-           normalize(head,(s:+LetBinding(p,hd))++r,env)
+        => val Comprehension(List(hd),s) = renameVars(normalize(c).asInstanceOf[Comprehension])
+           normalize(hds,(s:+LetBinding(p,hd))++r,env)
       case Generator(p,u)::r
-        => Generator(p,normalize(substE(u,env)))::normalize(head,r,freeEnv(p,env))
+        => Generator(p,normalize(substE(u,env)))::normalize(hds,r,freeEnv(p,env))
       case LetBinding(TuplePat(ps),Tuple(es))::r
-        => normalize(head,(ps zip es).map{ case (p,e) => LetBinding(p,e) }++r,env)
+        => normalize(hds,(ps zip es).map{ case (p,e) => LetBinding(p,e) }++r,env)
+      case LetBinding(p@VarPat(v),u@Var(w))::r
+        if pure(u) && canInline(p,Tuple(hds),r)
+        => normalize(hds,r,env+(v->substE(Var(w),env)))
       case LetBinding(p,u)::r
-        => if (pure(u) && canInline(p,head,r))
-              normalize(head,r,bindEnv(p,normalize(substE(u,env)))++freeEnv(p,env))
-           else LetBinding(p,normalize(substE(u,env)))::normalize(head,r,env)
+        => if (pure(u) && canInline(p,Tuple(hds),r))
+              normalize(hds,r,bindEnv(p,normalize(substE(u,env)))++freeEnv(p,env))
+           else LetBinding(p,normalize(substE(u,env)))::normalize(hds,r,env)
       case Predicate(BoolConst(false))::_
         => Nil
       case Predicate(BoolConst(true))::r
-        => normalize(head,r,env)
+        => normalize(hds,r,env)
       case Predicate(u)::r
-        => Predicate(substE(u,env))::normalize(head,r,env)
+        => Predicate(substE(u,env))::normalize(hds,r,env)
       case GroupByQual(p,u)::r
         => // lift all env vars except the group-by pattern vars
            val nenv = freeEnv(p,env).map{ case (v,x) => (v,elem(x)) }
-           GroupByQual(p,normalize(substE(u,env)))::normalize(head,r,nenv)
+           GroupByQual(p,normalize(substE(u,env)))::normalize(hds,r,nenv)
       case AssignQual(d,v)::r
-        => AssignQual(substE(d,env),substE(v,env))::normalize(head,r,env)
+        => AssignQual(substE(d,env),substE(v,env))::normalize(hds,r,env)
       case VarDef(v,u)::r
-        => VarDef(v,substE(u,env))::normalize(head,r,env)
+        => VarDef(v,substE(u,env))::normalize(hds,r,env)
     }
 
   /** normalize an expression */
@@ -185,13 +202,13 @@ object Normalizer {
         => Sequence(hds.map(normalize))
       case Comprehension(h,Predicate(p)::qs)
         => IfE(p,Comprehension(h,qs),empty())
-/*
+/* (needs renaming)
       case Comprehension(h,Generator(p,c@Comprehension(_,_))::qs)
-        => val Comprehension(h2,s) = renameVars(c)
+        => val Comprehension(List(h2),s) = renameVars(c)
            normalize(Comprehension(h,(s:+LetBinding(p,h2))++qs))
 */
       case Comprehension(hds,qs)
-        => normalize(Tuple(hds),qs,Map()) match {
+        => normalize(hds,qs,Map()) match {
              case nqs:+LetBinding(VarPat("@result"),Tuple(nh))
                => val nc = Comprehension(nh,nqs)
                   if (nc == e)

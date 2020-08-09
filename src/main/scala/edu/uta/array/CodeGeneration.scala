@@ -1,5 +1,5 @@
 /*
- * Copyright © 2019 University of Texas at Arlington
+ * Copyright © 2020 University of Texas at Arlington
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -70,6 +70,33 @@ abstract class CodeGeneration {
         => BasicType(tp.toString)
     }
 
+  def get_type_name ( name: String ): c.Tree
+    = name.split('.').toList match {
+            case List(m)
+              => tq"${TypeName(m)}"
+            case (m::s):+n
+              => Select(s.foldLeft[c.Tree](Ident(TermName(m))){ case (r,m) => Select(r,TermName(m)) },
+                        TypeName(n))
+            case _ => tq""
+           }
+
+  def Type2Tree ( tp: edu.uta.array.Type ): c.Tree =
+    tp match {
+      case TupleType(cs) if cs.nonEmpty
+        => val tcs = cs.map(Type2Tree)
+           tq"(..$tcs)"
+      case ParametricType(n,cs) if cs.nonEmpty
+        => val tcs = cs.map(Type2Tree)
+           val tn = get_type_name(n)
+           tq"$tn[..$tcs]"
+      case ParametricType(n,Nil)
+        => val tn = get_type_name(n)
+           tq"$tn"
+      case BasicType(n)
+        => get_type_name(n)
+      case _ => tq""
+    }
+
   /** Return the type of Scala code, if exists
    *  @param code Scala code
    *  @param env an environment that maps patterns to types
@@ -85,7 +112,10 @@ abstract class CodeGeneration {
                                  => val nv = TermName(c.freshName("x"))
                                     q"($nv:$tp) => $nv match { case $p => $r }" }
     val te = try c.Expr[Any](c.typecheck(q"{ import edu.uta.array._; $fc }")).actualType
-             catch { case ex: TypecheckException => return Right(ex) }
+             catch { case ex: TypecheckException
+                       => println("@@@ "+code+" "+env+" "+fc)
+                          return Right(ex)
+                   }
     Left(returned_type(type2tree(te)))
   }
 
@@ -134,7 +164,7 @@ abstract class CodeGeneration {
                             } catch { case ex: TypecheckException
                                  => return None }
                      }
-        case Right(_) => None
+        case Right(ex) => None
       }
 
   /** For a collection e, return the element type and the code of e */
@@ -223,7 +253,7 @@ abstract class CodeGeneration {
     q"(..$vs) => $ne"
   }
 
-  private var var_decls = collection.mutable.Map[String,c.Tree]()
+  var var_decls = collection.mutable.Map[String,c.Tree]()
 
   def element_type ( tp: c.Tree ): c.Tree
     = tp match {
@@ -308,6 +338,13 @@ abstract class CodeGeneration {
       case Call("array",d)
         => val dc = d.map(codeGen(_,env))
            q"Array.ofDim[Any](..$dc)"
+      case Call("matrix",List(n,m))
+        => val nc = codeGen(n,env)
+           val mc = codeGen(m,env)
+           q"Matrix($nc,$mc)"
+      case Call("tile",Nil)
+        => val ts = tileSize*tileSize
+           q"Array.ofDim[Any]($ts)"
       case Call(n,es)
         => val fm = TermName(method_name(n))
            codeList(es,cs => q"$fm(..$cs)",env)
@@ -410,6 +447,11 @@ abstract class CodeGeneration {
            val dc = d.map(codeGen(_,env))
            val etp = if (var_decls.contains(v)) element_type(var_decls(v)) else tq"Any"
            q"val $vc = Array.ofDim[$etp](..$dc)"
+      case VarDecl(v,Call("tile",d))
+        => val ts = tileSize*tileSize
+           val vc = TermName(v)
+           val etp = if (var_decls.contains(v)) element_type(var_decls(v)) else tq"Any"
+           q"val $vc = Array.ofDim[$etp]($ts)"
       case VarDecl(v,u)
         => val vc = TermName(v)
            val uc = codeGen(u,env)

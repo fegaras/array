@@ -8,19 +8,17 @@ object Test {
   def main ( args: Array[String] ) {
     val n = args(0).toInt
     val m = n
+val N = n
+val M = N
 
-    val M = Array.tabulate(n,m){ (i,j) => rand.nextDouble() }
-
-    //val X = Array.tabulate(n,m,n){ (i,j,k) => rand.nextDouble() }
+    val X = Array.tabulate(n){ i => rand.nextDouble() }
+    val Y = Array.tabulate(n){ i => rand.nextDouble() }
 
     ar("""
 
-       Array(M)[ x[i,j], (x+1)[j,i] | x[i,j] <- M ]
-/*
-       Array(n)[ (+/v / v.length)[i]
-               | v[i,j] <- M,
-                 group by i ].foreach(println)
-*/
+array(N*M)[ (k,+/v) | (i,x) <- X, (j,y) <- Y, i%M == j/M, v = x*y, group by k: i/M*M+j/M ]
+
+
        """)
 
   }

@@ -141,7 +141,7 @@ object Parser extends StandardTokenParsers {
   def term: Parser[Expr]
       = ( compr
         | ident ~ "(" ~ repsep( expr, "," ) ~ ")" ~ opt( compr ) ^^
-          { case n~_~List(v@Var(_))~_~Some(c) => Call(n,List(v,c))
+          { //case n~_~List(v@Var(_))~_~Some(c) => Call(n,List(v,c))
             case n~_~el~_~Some(c) => Call(n,List(Tuple(el),c))
             case n~_~es~_~None => Call(n,es) }
         | ident ~ compr ^^

@@ -1,5 +1,5 @@
 /*
- * Copyright © 2019 University of Texas at Arlington
+ * Copyright © 2020 University of Texas at Arlington
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,8 +25,10 @@ import scala.collection.mutable
 
 package object array {
 
-  var optimize = true
   var trace = true
+  var groupByJoin = true
+  var parallel = true
+  var tileSize = 1000
 
   def array[T: ClassTag] ( length: Int ) ( values: List[(Int,T)] ): Array[T] = {
     val a = Array.ofDim[T](length)
@@ -71,9 +73,7 @@ package object array {
     m
   }
 
-  def translate_query ( query: String ): Expr = {
-    val q = parse(query)
-    if (trace) println("Term:\n"+Pretty.print(q.toString))
+  def translate_query ( q: Expr ): Expr = {
     val c = ComprehensionTranslator.translate(q)
     if (trace) println("Translated comprehension:\n"+Pretty.print(c.toString))
     val n = Normalizer.normalizeAll(c)
@@ -81,8 +81,10 @@ package object array {
     val o = Normalizer.normalizeAll(Optimizer.optimizeAll(n))
     if (trace) println("Optimized comprehension:\n"+Pretty.print(o.toString))
     val e = Normalizer.normalizeAll(translate(o))
-    if (trace) println("Translated term:\n"+Pretty.print(e.toString))
-    e
+    if (trace) println("Final Translated term:\n"+Pretty.print(e.toString))
+    val p = if (parallel) Translator.parallelize(e) else e
+    if (trace && parallel) println("Parallelized term:\n"+Pretty.print(p.toString))
+    p
   }
 
   var typecheck_var: String => Option[Type] = _
@@ -91,13 +93,18 @@ package object array {
   def ar_impl ( c: Context ) ( query: c.Expr[String] ): c.Expr[Any] = {
     import c.universe.{Expr=>_,Type=>_,_}
     val context: c.type = c
-    val cg = new { val c: context.type = context } with CodeGeneration
+    val cg = new { val c: context.type = context } with Lifting
     val Literal(Constant(s:String)) = query.tree
     // hooks to the Scala compiler
     typecheck_var = ( v: String ) => cg.typecheckOpt(Var(v)).map(cg.Tree2Type)
     typecheck_expr = ( e: Expr) => cg.typecheckOpt(e).map(cg.Tree2Type)
-    val e = translate_query(s)
     val env: cg.Environment = Map()
+    cg.var_decls = collection.mutable.Map[String,c.Tree]()
+    val q = parse(s)
+    if (trace) println("Term:\n"+Pretty.print(q.toString))
+    val lq = cg.lift(q,env)
+    if (trace) println("Lifted term:\n"+Pretty.print(lq.toString))
+    val e = translate_query(lq)
     val ec = cg.codeGen(e,env)
     if (trace) println("Scala code:\n"+showCode(ec))
     val tp = cg.getType(ec,env)
@@ -108,12 +115,26 @@ package object array {
   /** translate an array comprehension to Scala code */
   def ar ( query: String ): Any = macro ar_impl
 
+  def parami_impl ( c: Context ) ( x: c.Expr[Int], b: c.Expr[Int] ): c.Expr[Unit] = {
+    import c.universe._
+    val Literal(Constant(bv:Int)) = b.tree
+    x.tree.toString.split('.').last match {
+       case "tileSize" => tileSize = bv
+       case p => throw new Error("Wrong param: "+p)
+    }
+    c.Expr[Unit](q"()")
+   }
+
+  /** set compilation parameters */
+  def parami ( x:Int, b: Int ): Unit = macro parami_impl
+
   def param_impl ( c: Context ) ( x: c.Expr[Boolean], b: c.Expr[Boolean] ): c.Expr[Unit] = {
     import c.universe._
     val Literal(Constant(bv:Boolean)) = b.tree
     x.tree.toString.split('.').last match {
-       case "optimize" => optimize = bv
        case "trace" => trace = bv
+       case "groupByJoin" => groupByJoin = bv
+       case "parallel" => parallel = bv
        case p => throw new Error("Wrong param: "+p)
     }
     c.Expr[Unit](q"()")

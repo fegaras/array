@@ -90,6 +90,14 @@ object Optimizer {
                                   case _ => None })
                   case _ => None })
 
+  def findLetBound ( qs: List[Qualifier] ): Option[List[Qualifier]]
+    = matchQ(qs,{ case Predicate(MethodCall(Var(v),"==",List(e))) => true; case _ => false },
+                { case (c@Predicate(MethodCall(_,_,List(e))))::s
+                    => matchQ(s,{ case LetBinding(p,u) => u == e; case _ => false },
+                                { case lb::_ => Some(List(c,lb))
+                                  case _ => None })
+                  case _ => None })
+
   /* true if the group-by key is a constant; then there will be just one group */
   def constantKey ( key: Expr ): Boolean
     = key match {
@@ -105,7 +113,8 @@ object Optimizer {
 
   /* true if the group-by key is unique, then the groups are singletons */
   def uniqueKey ( key: Expr, qs: List[Qualifier] ): Boolean = {
-     val is = qs.takeWhile(!_.isInstanceOf[GroupByQual]).flatMap {
+     val is = qs.takeWhile(!_.isInstanceOf[GroupByQual])
+                .flatMap {
                   case Generator(VarPat(i),MethodCall(_,"until",_))
                     => List(i)
                   case Generator(_,_)
@@ -157,9 +166,14 @@ object Optimizer {
                              jg@Generator(VarPat(j),MethodCall(n3,"until",List(n4))), c ))
                 => val mx = max(n1,n3)
                    val mn = min(n2,n4)
-                   val nqs = replace(c,Predicate(BoolConst(true)),
+                   val nqs = if (freevars(n4,freevars(e)) == Nil)
+                               replace(c,Predicate(BoolConst(true)),
                                      replace(jg,LetBinding(VarPat(j),Var(i)),
                                              replace(ig,Generator(VarPat(i),MethodCall(mx,"until",List(mn))),
+                                                     qs)))
+                             else replace(c,Predicate(MethodCall(Var(i),"<",List(n4))),
+                                     replace(jg,LetBinding(VarPat(j),Var(i)),
+                                             replace(ig,Generator(VarPat(i),MethodCall(mx,"until",List(n2))),
                                                      qs)))
                    optimize(Normalizer.normalize(Comprehension(h,nqs)))
              case _ => apply(e,optimize)
@@ -183,6 +197,16 @@ object Optimizer {
              case _ => apply(e,optimize)
            }
       case Comprehension(h,qs)
+        if { QLcache = findLetBound(qs); QLcache.nonEmpty }
+        => // simplify let-binding using an equality condition
+           QLcache match {
+             case Some(List(Predicate(MethodCall(Var(v),"==",List(e))),
+                            lb@LetBinding(p,w)))
+               => val nqs = replace(lb,LetBinding(p,Var(v)),qs)
+                  optimize(Comprehension(h,nqs))
+             case _ => apply(e,optimize)
+           }
+      case Comprehension(h,qs)
         => qs.span{ case GroupByQual(p,k) if constantKey(k) => false; case _ => true } match {
               case (r,GroupByQual(VarPat(k),u)::s)
                 => // a group-by on a constant key can be eliminated
@@ -196,8 +220,29 @@ object Optimizer {
                            val vs = comprVars(r).map(v => LetBinding(VarPat(v),Sequence(List(Var(v)))))
                            val bs = LetBinding(VarPat(k),u)+:vs
                            Comprehension(h,r++bs++s)
-                      case _ => apply(e,optimize)
-                   }
+                      case _
+                        => // a group-by on a unique key
+                           qs.span{ case Generator(TuplePat(List(k,v)),u)
+                                      if ComprehensionTranslator.isTiled(u)
+                                      => false
+                                    case _ => true } match {
+                             case (r,(x@Generator(TuplePat(List(k,v)),u))::(s:+GroupByQual(p,gk)))
+                               if toExpr(k) == gk
+                               => val groupByVars = patvars(p)
+                                  val liftedVars = freevars(Comprehension(h,Nil),groupByVars)
+                                                      .intersect(comprVars((r:+x)++s))
+                                  val lp = liftedVars match {
+                                              case List(v)
+                                                => VarPat(v)
+                                              case _
+                                                => TuplePat(liftedVars.map(VarPat))
+                                           }
+                                  val bs = List(LetBinding(lp,Comprehension(List(toExpr(lp)),s)),
+                                                LetBinding(p,gk))
+                                  normalizeAll(Comprehension(h,(r:+x)++bs))
+                             case _ => apply(e,optimize)
+                           }
+                }
            }
       case _ => apply(e,optimize)
     }

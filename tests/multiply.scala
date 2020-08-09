@@ -11,8 +11,6 @@ object Test {
     val M = Array.tabulate(n,n){ (i,j) => rand.nextDouble() }
     val N = Array.tabulate(n,n){ (i,j) => rand.nextDouble() }
 
-    param(optimize,true)
-
     var t: Long = System.currentTimeMillis()
 
     ar("""

@@ -127,4 +127,16 @@ object Translator {
            }
       case _ => apply(e,translate)
     }
+
+  /* parallelize first range flatMap */
+  def parallelize ( e: Expr ): Expr
+    = e match {
+          case flatMap(f,u@MethodCall(n,m,s))
+            if List("until","to").contains(m)
+            => MethodCall(flatMap(f,MethodCall(u,"par",null)),"toList",null)
+          case Call("foreach",List(f,u@MethodCall(n,m,s)))
+            if List("until","to").contains(m)
+            => Call("foreach",List(f,MethodCall(u,"par",null)))
+          case _ => apply(e,parallelize(_))
+      }
   }
