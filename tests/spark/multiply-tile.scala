@@ -55,7 +55,7 @@ object Multiply extends Serializable {
                    rdd[ (+/v)[i,j] | m[i,k] <- MM, n[kk,j] <- NN, v = m*n, k == kk, group by (i,j) ]
                    """)
         val x = C.count
-      } catch { case x: Throwable => println(x) }
+      } catch { case x: Throwable => println(x); return -1.0 }
       (System.currentTimeMillis()-t)/1000.0
     }
  
@@ -90,7 +90,7 @@ object Multiply extends Serializable {
       try {
         val C = A.multiply(B)
         val x = C.blocks.count
-      } catch { case x: Throwable => println(x) }
+      } catch { case x: Throwable => println(x); return -1.0 }
       (System.currentTimeMillis()-t)/1000.0
     }
 
@@ -101,7 +101,7 @@ object Multiply extends Serializable {
                    tiled(n,m)[ ((i,j),+/c) | ((i,k),m) <- AA, ((kk,j),n) <- BB, k == kk, c = m*n, group by (i,j) ]
                    """)
         val x = C._3.count
-      } catch { case x: Throwable => println(x) }
+      } catch { case x: Throwable => println(x); return -1.0 }
       (System.currentTimeMillis()-t)/1000.0
     }
 
@@ -113,7 +113,7 @@ object Multiply extends Serializable {
                    tiled(n,m)[ ((i,j),+/c) | ((i,k),m) <- AA, ((kk,j),n) <- BB, k == kk, c = m*n, group by (i,j) ]
                    """)
         val x = C._3.count
-      } catch { case x: Throwable => println(x) }
+      } catch { case x: Throwable => println(x); return -1.0 }
       param(parallel,true)
       (System.currentTimeMillis()-t)/1000.0
     }
@@ -126,7 +126,7 @@ object Multiply extends Serializable {
                    tiled(n,m)[ ((i,j),+/c) | ((i,k),m) <- AA, ((kk,j),n) <- BB, k == kk, c = m*n, group by (i,j) ]
                    """)
         val x = C._3.count
-      } catch { case x: Throwable => println(x) }
+      } catch { case x: Throwable => println(x); return -1.0 }
       param(groupByJoin,true)
       (System.currentTimeMillis()-t)/1000.0
     }
@@ -156,7 +156,7 @@ object Multiply extends Serializable {
                   .map{ case (_,((i,a),(j,b))) => ((i,j),mult(a,b)) }
                   .reduceByKey(add)
         val c = S.count
-      } catch { case x: Throwable => println(x) }
+      } catch { case x: Throwable => println(x); return -1.0 }
       (System.currentTimeMillis()-t)/1000.0
     }
 
@@ -176,26 +176,38 @@ object Multiply extends Serializable {
                    c
                }
         val x = C.count
-      } catch { case x: Throwable => println(x) }
+      } catch { case x: Throwable => println(x); return -1.0 }
       (System.currentTimeMillis()-t)/1000.0
     }
 
     def test ( name: String, f: => Double ) {
       val cores = Runtime.getRuntime().availableProcessors()
-      val s = (for ( i <- 1 to repeats ) yield f).sum
+      var i = 0
+      var j = 0
+      var s = 0.0
+      while ( i < repeats && j < 10 ) {
+        val t = f
+        j += 1
+        if (t > 0.0) {   // if f didn't crash
+          i += 1
+          println("Try: "+i+"/"+j+" time: "+t)
+          s += t
+        }
+      }
+      if (i > 0) s = s/i
       print("*** %s cores=%d n=%d N=%d %.2f GB ".format(name,cores,n,N,(8.0*n.toDouble*n)/(1024.0*1024.0*1024.0)))
-      println("%.3f secs".format(s/repeats))
+      println("tries=%d %.3f secs".format(i,s))
     }
 
-    if (!gbj)
+    if (!gbj) {
       test("MLlib Multiply",testMultiplyMLlib)
-    //test("handcoded groupBy Multiply",testMultiplyDiablo3)
-    //test("handcoded groupByJoin Multiply",testMultiplyDiablo4)
-    if (!gbj)
+      //test("handcoded groupBy Multiply",testMultiplyDiablo3)
+      //test("handcoded groupByJoin Multiply",testMultiplyDiablo4)
       test("DIABLO groupBy Multiply",testMultiplyDiablo2)
+      //test("DIABLO groupByJoin sequential Multiply",testMultiplyDiablo1s)
+      //test("DIABLO IJV Multiply",testMultiplyIJV)
+    }
     test("DIABLO groupByJoin Multiply",testMultiplyDiablo1)
-    //test("DIABLO groupByJoin sequential Multiply",testMultiplyDiablo1s)
-    //test("DIABLO IJV Multiply",testMultiplyIJV)
 
     sc.stop()
   }

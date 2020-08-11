@@ -63,7 +63,7 @@ object Add {
       try {
         val C = A.add(B)
         val x = C.blocks.count
-      } catch { case x: Throwable => println(x) }
+      } catch { case x: Throwable => println(x); return -1.0 }
       (System.currentTimeMillis()-t)/1000.0
     }
 
@@ -74,7 +74,7 @@ object Add {
                    tiled(n,m)[ ((i,j),m+n) | ((i,j),m) <- AA, ((ii,jj),n) <- BB, ii == i, jj == j ]
                    """)
         val x = C._3.count
-      } catch { case x: Throwable => println(x) }
+      } catch { case x: Throwable => println(x); return -1.0 }
       (System.currentTimeMillis()-t)/1000.0
     }
 
@@ -86,16 +86,28 @@ object Add {
                    tiled(n,m)[ ((i,j),m+n) | ((i,j),m) <- AA, ((ii,jj),n) <- BB, ii == i, jj == j ]
                    """)
         val x = C._3.count
-      } catch { case x: Throwable => println(x) }
+      } catch { case x: Throwable => println(x); return -1.0 }
       param(parallel,true)
       (System.currentTimeMillis()-t)/1000.0
     }
 
     def test ( name: String, f: => Double ) {
       val cores = Runtime.getRuntime().availableProcessors()
-      val s = (for ( i <- 1 to repeats ) yield f).sum
+      var i = 0
+      var j = 0
+      var s = 0.0
+      while ( i < repeats && j < 10 ) {
+        val t = f
+        j += 1
+        if (t > 0.0) {   // if f didn't crash
+          i += 1
+          println("Try: "+i+"/"+j+" time: "+t)
+          s += t
+        }
+      }
+      if (i > 0) s = s/i
       print("*** %s cores=%d n=%d N=%d %.2f GB ".format(name,cores,n,N,(8.0*n.toDouble*n)/(1024.0*1024.0*1024.0)))
-      println("%.3f secs".format(s/repeats))
+      println("tries=%d %.3f secs".format(i,s))
     }
 
     test("MLlib Add",testAddMLlib)

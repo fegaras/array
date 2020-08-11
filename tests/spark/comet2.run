@@ -49,7 +49,7 @@ done
 rm -rf classes
 mkdir -p classes
 
-scala_files="add-tile.scala multiply-tile.scala factorization.scala"
+scala_files="factorization.scala"
 for f in $scala_files; do
     echo compiling $f ...
     $SCALA_HOME/bin/scalac -d classes -cp classes:${JARS}:${ARRAY_HOME}/lib/array.jar $f
@@ -62,15 +62,6 @@ ns=5             # number of datasets per experiment
 repeat=4         # number of repetitions of each experiment
 
 for ((i=1; i<=$ns; i++)); do   # for each different dataset
-
-   j=$(echo "scale=3;sqrt($i/$ns)*400*$scale" | bc); n=${j%.*}
-      $SPARK_HOME/bin/spark-submit --jars ${ARRAY_HOME}/lib/array.jar --class Add --master $MASTER $SPARK_OPTIONS test.jar $repeat $n
-
-   j=$(echo "scale=3;sqrt($i/$ns)*80*$scale" | bc); n=${j%.*}
-      $SPARK_HOME/bin/spark-submit --jars ${ARRAY_HOME}/lib/array.jar --class Multiply --master $MASTER $SPARK_OPTIONS test.jar $repeat $n 0
-
-   j=$(echo "scale=3;sqrt($i/$ns)*200*$scale" | bc); n=${j%.*}
-      $SPARK_HOME/bin/spark-submit --jars ${ARRAY_HOME}/lib/array.jar --class Multiply --master $MASTER $SPARK_OPTIONS test.jar $repeat $n 1
 
    j=$(echo "scale=3;sqrt($i/$ns)*200*$scale" | bc); n=${j%.*}
       $SPARK_HOME/bin/spark-submit --jars ${ARRAY_HOME}/lib/array.jar --class Factorization --master $MASTER $SPARK_OPTIONS test.jar $repeat $n $n 1000 0
