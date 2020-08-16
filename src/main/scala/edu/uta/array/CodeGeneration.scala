@@ -309,6 +309,12 @@ abstract class CodeGeneration {
            if (irrefutable(p))
               q"$xc.flatMap(($nv:$tp) => $nv match { case $pc => $bc })"
            else q"$xc.flatMap(($nv:$tp) => $nv match { case $pc => $bc; case _ => Nil })"
+      case Call("foreach",List(Lambda(p@VarPat(v),b),MethodCall(n,"until",List(m))))
+        => val nv = TermName(v)
+           val bc = codeGen(b,add(p,tq"Int",env))
+           val nc = codeGen(n,env)
+           val mc = codeGen(m,env)
+           q"{ var $nv = $nc; while($nv < $mc){ $bc; $nv += 1 } }"
       case Call("foreach",List(Lambda(p@VarPat(v),b),x))
         => val (tp,xc) = typedCode(x,env)
            val nv = TermName(v)
