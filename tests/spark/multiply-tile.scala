@@ -27,7 +27,8 @@ object Multiply extends Serializable {
     val m = n
     val gbj = args(2) == "1"  // groupByJoin only
     parami(tileSize,1000) // each tile has size N*N
-    val N = tileSize
+    val N = 1000
+    val validate_output = false
 
     val conf = new SparkConf().setAppName("tiles")
     val sc = new SparkContext(conf)
@@ -72,14 +73,14 @@ object Multiply extends Serializable {
         .map{ case (i,j) => ((i,j),randomTile()) }
     }
 
-    val Am = randomMatrix(n,n)
-    val Bm = randomMatrix(n,n)
+    val Am = randomMatrix(n,m).cache()
+    val Bm = randomMatrix(n,m).cache()
 
     val A = new BlockMatrix(Am,N,N)
     val B = new BlockMatrix(Bm,N,N)
 
-    val AA = (n,m,Am.map{ case ((i,j),a) => ((i,j),a.toArray) })
-    val BB = (n,m,Bm.map{ case ((i,j),a) => ((i,j),a.toArray) })
+    val AA = (n,m,Am.map{ case ((i,j),a) => ((i,j),a.transpose.toArray) })
+    val BB = (n,m,Bm.map{ case ((i,j),a) => ((i,j),a.transpose.toArray) })
 
     def map ( m: BlockMatrix, f: Double => Double ): BlockMatrix
       = new BlockMatrix(m.blocks.map{ case (i,a) => (i,new DenseMatrix(N,N,a.toArray.map(f))) },
@@ -100,7 +101,7 @@ object Multiply extends Serializable {
         val C = ar("""
                    tiled(n,m)[ ((i,j),+/c) | ((i,k),m) <- AA, ((kk,j),n) <- BB, k == kk, c = m*n, group by (i,j) ]
                    """)
-        val x = C._3.count
+        validate(C)
       } catch { case x: Throwable => println(x); return -1.0 }
       (System.currentTimeMillis()-t)/1000.0
     }
@@ -125,7 +126,7 @@ object Multiply extends Serializable {
         val C = ar("""
                    tiled(n,m)[ ((i,j),+/c) | ((i,k),m) <- AA, ((kk,j),n) <- BB, k == kk, c = m*n, group by (i,j) ]
                    """)
-        val x = C._3.count
+        validate(C)
       } catch { case x: Throwable => println(x); return -1.0 }
       param(groupByJoin,true)
       (System.currentTimeMillis()-t)/1000.0
@@ -151,11 +152,11 @@ object Multiply extends Serializable {
     def testMultiplyDiablo3 (): Double = {
       val t: Long = System.currentTimeMillis()
       try {
-        val S = AA._3.map{ case ((i,k),a) => (k,(i,a)) }
-                  .join( BB._3.map{ case ((kk,j),b) => (kk,(j,b)) } )
-                  .map{ case (_,((i,a),(j,b))) => ((i,j),mult(a,b)) }
-                  .reduceByKey(add)
-        val c = S.count
+        val C = (n,m,AA._3.map{ case ((i,k),a) => (k,(i,a)) }
+                       .join( BB._3.map{ case ((kk,j),b) => (kk,(j,b)) } )
+                       .map{ case (_,((i,a),(j,b))) => ((i,j),mult(a,b)) }
+                       .reduceByKey(add))
+        validate(C)
       } catch { case x: Throwable => println(x); return -1.0 }
       (System.currentTimeMillis()-t)/1000.0
     }
@@ -163,21 +164,37 @@ object Multiply extends Serializable {
     def testMultiplyDiablo4  (): Double = {
       val t = System.currentTimeMillis()
       try {
-        val C = AA._3.flatMap{ case ((i,k),a) => (0 until n/N).map(j => ((i,j),(k,a))) }
-         .cogroup( BB._3.flatMap{ case ((k,j),b) => (0 until n/N).map(i => ((i,j),(k,b))) } )
-         .mapValues{ case (as,bs)
-                => val c = Array.ofDim[Double](N*N)
-                   for { (k1,a) <- as
-                         (k2,b) <- bs if k2 == k1
-                         i <- (0 until N).par
-                         k <- 0 until N
-                         j <- 0 until N
-                       } c(i*N+j) += a(i*N+k)*b(k*N+j)
-                   c
-               }
-        val x = C.count
+        val C = (n,m,AA._3.flatMap{ case ((i,k),a) => (0 until n/N).map(j => ((i,j),(k,a))) }
+                       .cogroup( BB._3.flatMap{ case ((k,j),b) => (0 until n/N).map(i => ((i,j),(k,b))) } )
+                       .mapValues{ case (as,bs)
+                                     => val c = Array.ofDim[Double](N*N)
+                                        for { (k1,a) <- as
+                                              (k2,b) <- bs if k2 == k1
+                                              i <- (0 until N).par
+                                              k <- 0 until N
+                                              j <- 0 until N
+                                            } c(i*N+j) += a(i*N+k)*b(k*N+j)
+                                   c
+                                 })
+        validate(C)
       } catch { case x: Throwable => println(x); return -1.0 }
       (System.currentTimeMillis()-t)/1000.0
+    }
+
+    def validate ( M: (Int,Int,RDD[((Int,Int),Array[Double])]) ) {
+      if (!validate_output)
+        M._3.count()
+      else {
+        val C = A.multiply(B).toLocalMatrix()
+        val MM = M._3.collect
+        for { ((ii,jj),a) <- MM;
+              i <- 0 until N;
+              j <- 0 until N }
+           if (ii*N+i < M._1 && jj*N+j < M._2
+               && Math.abs(a(i*N+j)-C(ii*N+i,jj*N+j)) > 0.01)
+             println("Element (%d,%d)(%d,%d) is wrong: %.3f %.3f"
+                     .format(ii,jj,i,j,a(i*N+j),C(ii*N+i,jj*N+j)))
+      }
     }
 
     def test ( name: String, f: => Double ) {
@@ -201,11 +218,7 @@ object Multiply extends Serializable {
 
     if (!gbj) {
       test("MLlib Multiply",testMultiplyMLlib)
-      //test("handcoded groupBy Multiply",testMultiplyDiablo3)
-      //test("handcoded groupByJoin Multiply",testMultiplyDiablo4)
       test("DIABLO groupBy Multiply",testMultiplyDiablo2)
-      //test("DIABLO groupByJoin sequential Multiply",testMultiplyDiablo1s)
-      //test("DIABLO IJV Multiply",testMultiplyIJV)
     }
     test("DIABLO groupByJoin Multiply",testMultiplyDiablo1)
 

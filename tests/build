@@ -4,4 +4,4 @@ AHOME="$(cd `dirname $0`/..; pwd -P)"
 
 rm -rf classes
 mkdir -p classes
-scalac -d classes -cp ${AHOME}/lib/array.jar $*
+scalac -d classes -cp ${AHOME}/lib/array.jar -optimise $*

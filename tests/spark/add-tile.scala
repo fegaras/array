@@ -25,7 +25,8 @@ object Add {
     val n = args(1).toInt   // each matrix has n*n elements
     val m = n
     parami(tileSize,1000) // each tile has size N*N
-    val N = tileSize
+    val N = 1000
+    val validate_output = false
 
     val conf = new SparkConf().setAppName("tiles")
     val sc = new SparkContext(conf)
@@ -46,16 +47,14 @@ object Add {
         .map{ case (i,j) => ((i,j),randomTile()) }
     }
 
-    val Am = randomMatrix(n,n)
-    val Bm = randomMatrix(n,n)
+    val Am = randomMatrix(n,m).cache()
+    val Bm = randomMatrix(n,m).cache()
 
     val A = new BlockMatrix(Am,N,N)
     val B = new BlockMatrix(Bm,N,N)
-    A.validate()
-    B.validate()
 
-    val AA = (n,n,Am.map{ case ((i,j),a) => ((i,j),a.toArray) })
-    val BB = (n,n,Bm.map{ case ((i,j),a) => ((i,j),a.toArray) })
+    val AA = (n,n,Am.map{ case ((i,j),a) => ((i,j),a.transpose.toArray) })
+    val BB = (n,n,Bm.map{ case ((i,j),a) => ((i,j),a.transpose.toArray) })
     val CC = BB
 
     def testAddMLlib: Double = {
@@ -73,7 +72,7 @@ object Add {
         val C = ar("""
                    tiled(n,m)[ ((i,j),m+n) | ((i,j),m) <- AA, ((ii,jj),n) <- BB, ii == i, jj == j ]
                    """)
-        val x = C._3.count
+        validate(C)
       } catch { case x: Throwable => println(x); return -1.0 }
       (System.currentTimeMillis()-t)/1000.0
     }
@@ -85,10 +84,26 @@ object Add {
         val C = ar("""
                    tiled(n,m)[ ((i,j),m+n) | ((i,j),m) <- AA, ((ii,jj),n) <- BB, ii == i, jj == j ]
                    """)
-        val x = C._3.count
+        validate(C)
       } catch { case x: Throwable => println(x); return -1.0 }
       param(parallel,true)
       (System.currentTimeMillis()-t)/1000.0
+    }
+
+    def validate ( M: (Int,Int,RDD[((Int,Int),Array[Double])]) ) {
+      if (!validate_output)
+        M._3.count()
+      else {
+        val C = A.add(B).toLocalMatrix()
+        val MM = M._3.collect
+        for { ((ii,jj),a) <- MM;
+              i <- 0 until N;
+              j <- 0 until N }
+           if (ii*N+i < M._1 && jj*N+j < M._2
+               && Math.abs(a(i*N+j)-C(ii*N+i,jj*N+j)) > 0.01)
+             println("Element (%d,%d)(%d,%d) is wrong: %.3f %.3f"
+                     .format(ii,jj,i,j,a(i*N+j),C(ii*N+i,jj*N+j)))
+      }
     }
 
     def test ( name: String, f: => Double ) {
@@ -112,7 +127,6 @@ object Add {
 
     test("MLlib Add",testAddMLlib)
     test("DIABLO Add",testAddDiablo)
-    //test("DIABLO sequential Add",testAddDiablo)
 
     sc.stop()
   }
