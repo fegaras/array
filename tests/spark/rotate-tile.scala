@@ -8,7 +8,7 @@ import org.apache.hadoop.fs._
 import scala.util.Random
 import Math._
 
-object Tiles {
+object Rotate {
   /* The size of any serializable object */
   def sizeof ( x: Serializable ): Int = {
     import java.io.{ByteArrayOutputStream,ObjectOutputStream}
@@ -24,7 +24,8 @@ object Tiles {
     val repeats = args(0).toInt
     val n = args(1).toInt   // each matrix has n*n elements
     val m = n
-    val N = 1000   // each tile has size N*N
+    parami(tileSize,1000) // each tile has size N*N
+    val N = 1000
 
     val conf = new SparkConf().setAppName("tiles")
     val sc = new SparkContext(conf)
@@ -39,34 +40,31 @@ object Tiles {
     }
 
     def randomMatrix ( rows: Int, cols: Int ): RDD[((Int, Int),org.apache.spark.mllib.linalg.Matrix)] = {
-      val l = Random.shuffle((0 until rows/N).toList)
-      val r = Random.shuffle((0 until cols/N).toList)
+      val l = Random.shuffle((0 until (rows+N-1)/N).toList)
+      val r = Random.shuffle((0 until (rows+N-1)/N).toList)
       sc.parallelize(for { i <- l; j <- r } yield (i,j))
         .map{ case (i,j) => ((i,j),randomTile()) }
     }
 
-    val Am = randomMatrix(n,n)
-    val Bm = randomMatrix(n,n)
+    val Am = randomMatrix(n,m).cache()
 
     val A = new BlockMatrix(Am,N,N)
-    val B = new BlockMatrix(Bm,N,N)
-    A.validate()
-    B.validate()
 
-    val AA = (n,n,Am.map{ case ((i,j),a) => ((i,j),a.toArray) })
-    val BB = (n,n,Bm.map{ case ((i,j),a) => ((i,j),a.toArray) })
-    val CC = BB
+    val AA = (n,m,Am.map{ case ((i,j),a) => ((i,j),a.toArray) })
 
-    def testAddMLlib: Double = {
-      val t = System.currentTimeMillis()
-      try {
-        val C = A.add(B)
-        val x = C.blocks.count
-      } catch { case x: Throwable => println(x) }
-      (System.currentTimeMillis()-t)/1000.0
+    def printM ( M: (Int,Int,RDD[((Int,Int),Array[Double])]) ) {
+        val MM = M._3.collect.sortBy(_._1)
+        for { ((ii,jj),a) <- MM } {
+              println("tile: "+ii+" "+jj)
+              for { i <- 0 until N } {
+                  for { j <- 0 until N }
+                     print(" %.1f".format(a(i*N+j)))
+                  println()
+              }
+        }
     }
 
-    def testAddDiablo: Double = {
+    def testRotateDiablo: Double = {
       val t = System.currentTimeMillis()
       try {
         val C = ar("""
@@ -84,8 +82,7 @@ object Tiles {
       println("%.3f secs".format(s/repeats))
     }
 
-    test("DIABLO Add",testAddDiablo)
-    test("MLlib Add",testAddMLlib)
+    test("DIABLO Rotate",testRotateDiablo)
 
     sc.stop()
   }

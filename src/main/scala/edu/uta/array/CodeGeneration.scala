@@ -113,7 +113,7 @@ abstract class CodeGeneration {
                                     q"($nv:$tp) => $nv match { case $p => $r }" }
     val te = try c.Expr[Any](c.typecheck(q"{ import edu.uta.array._; $fc }")).actualType
              catch { case ex: TypecheckException
-                       => println("@@@ "+code+" "+env+" "+fc)
+                       => //println("@@@ "+code+" "+env+" "+fc)
                           return Right(ex)
                    }
     Left(returned_type(type2tree(te)))

@@ -386,19 +386,26 @@ object ComprehensionTranslator {
           case (r,Generator(TuplePat(List(k,VarPat(v))),
                             e@Call("lifted",List(_,_,te))))
             if isTiled(e)
-            => r++List(Generator(TuplePat(List(k,VarPat("_"+v))),
+            => r++List(Generator(TuplePat(List(usc(k),VarPat("_"+v))),
                                  Call("lifted",List(StringConst("rdd"),
                                                     Nth(te,3),Nth(te,3)))),
-                       LetBinding(VarPat("__"+v),Tuple(List(toExpr(k),Var("_"+v)))))
+                       LetBinding(VarPat("__"+v),Tuple(List(toExpr(usc(k)),Var("_"+v)))))
           case (r,Generator(p,e@Call("lifted",List(_,re,_))))
             if isRDD(e)
             => r:+Generator(p,e)
           case (r,Predicate(e))
             if freevars(e,rvs).isEmpty
-            => r:+Predicate(e)
+            => r:+Predicate(usc(e))
           case (r,_) => r
       }
   }
+
+  def usc ( e: Expr ): Expr
+    = e match {
+        case Var(v)
+          => Var("_"+v)
+        case _ => apply(e,usc)
+      }
 
   def usc ( p: Pattern ): Pattern
     = p match {
@@ -421,34 +428,35 @@ object ComprehensionTranslator {
             => r:+LetBinding(p,e)
           case (r,Predicate(e))
             if freevars(e,tvs).isEmpty
-            => r:+Predicate(e)
+            => r:+Predicate(e):+Predicate(usc(e))
           case (r,_) => r
       }
   }
 
-  def shuffle_tiles ( hs: List[Expr], qs: List[Qualifier], group_by: Boolean ): Expr
+  def shuffle_tiles ( hs: List[Expr], qs: List[Qualifier], group_by: Boolean, dims: List[Expr] ): Expr
     = hs match {
-        case List(Tuple(List(Tuple(ks),_)))
+        case List(Tuple(List(Tuple(ks),h)))
           => val N = IntConst(tileSize)
              val range = MethodCall(IntConst(0),"until",List(N))
              val fs = tiled_variables(qs)
              val vs = ks.map{ _ => newvar }
-             val gkeys = (ks zip vs).map {
+             def gkeys ( op: String )
+               = (ks zip vs).map {
                           case (k,vk)
                             => val is = freevars(k,Nil).intersect(fs)
-                               val gk = is.map{ v => (v, MethodCall(MethodCall(Var("_"+v),"*",List(N)),
-                                                                    "+",List(Var(v)))) }
+                               val gk = is.map{ v => (v,MethodCall(MethodCall(Var("_"+v),"*",List(N)),
+                                                                   "+",List(Var(v)))) }
                                MethodCall(gk.foldLeft[Expr](k){ case (r,(v,e)) => subst(v,e,r) },
-                                          "/",List(N))
+                                          op,List(N))
                          }
-             val tiles = (ks zip vs zip gkeys).map {
+             val tiles = (ks zip vs zip gkeys("/")).map {
                             case ((Var(v),vk),_)
-                              => LetBinding(VarPat(vk),Var(v))
+                              => LetBinding(VarPat(vk),Var("_"+v))
                             case ((k,vk),gkey)
                               => val is = freevars(k,Nil).intersect(fs)
                                  Generator(VarPat(vk),
                                            Comprehension(List(Var(vk)),
-                                                         is.map{ v => Generator(VarPat("_"+v),range) }:+
+                                                         is.map{ v => Generator(VarPat(v),range) }:+
                                                             GroupByQual(VarPat(vk),gkey)))
                          }
              val rqs = get_rdd_qualifiers_general(qs)++tiles:+
@@ -457,11 +465,22 @@ object ComprehensionTranslator {
              val tqs = if (group_by)
                          List(GroupByQual(TuplePat(ks.map{ case Var(v) => VarPat(v); case _ => VarPat("") }),
                                           Tuple(ks)))
-                       else (vs zip gkeys).map {
+                       else (vs zip gkeys("/")).map {
                                case (vk,gkey)
                                  => Predicate(MethodCall(Var(vk),"==",List(gkey)))
                             }
-             val tile = Call("tile",List(Tuple(Nil),Comprehension(hs,get_tile_qualifiers_general(qs)++tqs)))
+             val guards = (ks zip vs zip dims).flatMap {
+                            case ((k,vk),d)
+                              if !group_by
+                              => val is = freevars(k,Nil).intersect(fs)
+                                 is.map{ v => Predicate(MethodCall(MethodCall(MethodCall(Var("_"+v),"*",List(N)),
+                                                                              "+",List(Var(v))),
+                                                                   "<",List(d))) }
+                            case _ => Nil
+                          }
+             val tile = Call("tile",List(Tuple(Nil),
+                                         Comprehension(List(Tuple(List(Tuple(if (group_by) ks else gkeys("%")),h))),
+                                                       get_tile_qualifiers_general(qs)++guards++tqs)))
              val rdd = Call("rdd",List(Comprehension(List(Tuple(List(Tuple(vs.map(Var(_))),tile))),
                                                      rqs)))
              //println("??? "+Pretty.print(rdd.toString))
@@ -505,7 +524,6 @@ object ComprehensionTranslator {
                                   case _ => None })
                   case _ => None })
 
-
   var QLcache: Option[List[Qualifier]] = None
 
   def translate_tiled ( hs: List[Expr], qs: List[Qualifier], n: Expr, m: Expr ): Expr
@@ -520,7 +538,7 @@ object ComprehensionTranslator {
              translate(rdd)
         case List(Tuple(List(Tuple(ks),_)))   // a tiled comprehension that doesn't preserve tiling
           if !has_groupby(qs)
-          => shuffle_tiles(hs,qs,false)
+          => shuffle_tiles(hs,qs,false,List(n,m))
         case _
           if groupByJoin && { QLcache = findGroupByJoin(qs); QLcache.nonEmpty }
           => QLcache match {          // group-by join
@@ -578,7 +596,7 @@ object ComprehensionTranslator {
         case List(Tuple(List(kp,_)))        // a tiled comprehension with a group-by
           => qs.span{ case GroupByQual(p,_) if kp == toExpr(p) => false; case _ => true } match {
                 case (r,GroupByQual(p,k)::s)
-                  => shuffle_tiles(hs,r,true)
+                  => shuffle_tiles(hs,r,true,List(n,m))
                 case _ => Comprehension(hs,qs)
             }
         case _ => Comprehension(hs,qs)
@@ -641,18 +659,18 @@ object ComprehensionTranslator {
                                              MethodCall(MapAccess(Var(xv),kve),
                                                         ":+",
                                                         List(le))))
-           val incr = xvinit ++ reducedTerms.map {
+           val incr = xvinit ++ reducedTerms.flatMap {
                                case (v,reduce(m,MethodCall(x,"map",List(f))))
-                                 => AssignQual(MapAccess(Var(v),kve),
-                                               MethodCall(MapAccess(Var(v),kve),
-                                                          m,
-                                                          List(Apply(f,x))))
+                                 => List(AssignQual(MapAccess(Var(v),kve),
+                                                    MethodCall(MapAccess(Var(v),kve),
+                                                               m,
+                                                               List(Apply(f,x)))))
                                case (v,reduce(m,x))
-                                 => AssignQual(MapAccess(Var(v),kve),
-                                               MethodCall(MapAccess(Var(v),kve),
-                                                          m,
-                                                          List(x)))
-                               case _ => Predicate(BoolConst(true))
+                                 => List(AssignQual(MapAccess(Var(v),kve),
+                                                    MethodCall(MapAccess(Var(v),kve),
+                                                               m,
+                                                               List(x))))
+                               case _ => Nil
                            }
            val nqs = if (array == "tile")
                        qs++List(LetBinding(TuplePat(List(VarPat(kv),VarPat(kw))),k))++incr++ts

@@ -24,7 +24,8 @@ object Tiles {
     val repeats = args(0).toInt
     val n = args(1).toInt   // each matrix has n*n elements
     val m = n
-    val N = 1000   // each tile has size N*N
+    parami(tileSize,1000) // each tile has size N*N
+    val N = 1000
 
     val conf = new SparkConf().setAppName("tiles")
     val sc = new SparkContext(conf)
@@ -39,14 +40,14 @@ object Tiles {
     }
 
     def randomMatrix ( rows: Int, cols: Int ): RDD[((Int, Int),org.apache.spark.mllib.linalg.Matrix)] = {
-      val l = Random.shuffle((0 until rows/N).toList)
-      val r = Random.shuffle((0 until cols/N).toList)
+      val l = Random.shuffle((0 until (rows+N-1)/N).toList)
+      val r = Random.shuffle((0 until (rows+N-1)/N).toList)
       sc.parallelize(for { i <- l; j <- r } yield (i,j))
         .map{ case (i,j) => ((i,j),randomTile()) }
     }
 
-    val Am = randomMatrix(n,n)
-    val Bm = randomMatrix(n,n)
+    val Am = randomMatrix(n,n).cache()
+    val Bm = randomMatrix(n,n).cache()
 
     val A = new BlockMatrix(Am,N,N)
     val B = new BlockMatrix(Bm,N,N)
@@ -73,12 +74,12 @@ object Tiles {
       val t = System.currentTimeMillis()
       try {
         val C = ar("""
-                   //tiled(n,m)[ ((i,j),+/c) | ((i,k),m) <- AA, ((kk,j),n) <- BB, k == kk, c = m*n, group by (i,j) ]
-                   //tiled(n,m)[ ((i,j),+/c) | ((i,k),m) <- AA, ((kk,j),n) <- BB, k == kk, ((ii,jj),mm) <- AA, i==ii, k==jj, c = m*n*mm, group by (i,j) ]
+                   tiled(n,m)[ ((i,j),+/c) | ((i,k),m) <- AA, ((kk,j),n) <- BB, k == kk, c = m*n, group by (i,j) ]
+                   // wrong: tiled(n,m)[ ((i,j),+/c) | ((i,k),m) <- AA, ((kk,j),n) <- BB, k == kk, ((ii,jj),mm) <- AA, i==ii, k==jj, c = m*n*mm, group by (i,j) ]
                    //tiled(n,m)[ ((i,j),m+1) | ((i,j),m) <- AA ]
-                   tiled(n,m)[ ((j,i),m) | ((i,j),m) <- AA ]
+                   //tiled(n,m)[ ((j,i),m) | ((i,j),m) <- AA ]
                    """)
-        val x = C.count
+        val x = C._3.count()
       } catch { case x: Throwable => println(x) }
       (System.currentTimeMillis()-t)/1000.0
     }

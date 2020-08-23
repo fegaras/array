@@ -20,11 +20,11 @@ object Test {
     val X = ar("""
        //rdd[ i+j | i <- P, j <- R, i == j ]
 
-       rdd[ (i,a+1) | (i,a) <- S ]
+       //rdd[ (i,a+1) | (i,a) <- S ]
 
        //rdd[ (i,a+b) | (i,a) <- S, (j,b) <- T, i == j ]
 
-       //rdd[ (i,+/a,+/b) | (i,a) <- S, (j,b) <- T, i == j, group by i ]
+       rdd[ (i,+/a,+/b) | (i,a) <- S, (j,b) <- T, i == j, group by i ]
 
        //rdd[ (i,a+b*c) | (i,a) <- S, (j,b) <- T, (l,c) <- Q, i == j, l == i ]
 

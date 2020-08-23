@@ -36,7 +36,7 @@ object Factorization extends Serializable {
     val d = args(3).toInt  // number of attributes
     val mode = args(4) == "1"
     parami(tileSize,1000) // each tile has size N*N
-    val N = tileSize
+    val N = 1000
 
     val conf = new SparkConf().setAppName("tiles")
     val sc = new SparkContext(conf)
