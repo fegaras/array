@@ -326,6 +326,15 @@ abstract class CodeGeneration {
            val nv = TermName(c.freshName("x"))
            val bc = codeGen(b,add(p,tp,env))
            q"$xc.foreach(($nv:$tp) => $nv match { case $pc => $bc })"
+      case MethodCall(x,"reduceByKey",List(Lambda(p,b)))
+        => val (tp,xc) = typedCode(x,env)
+           val pc = code(p)
+           tp match {
+             case tq"($kt,$et)"
+               => val bc = codeGen(b,add(p,tq"($et,$et)",env))
+                  q"$xc.reduceByKey{ case $pc => $bc }"
+             case _ => throw new Exception("Wrong reduceByKey: "+e)
+           }
       case groupBy(x)
         => val xc = codeGen(x,env)
            q"$xc.groupBy(_._1).mapValues( _.map(_._2))"
