@@ -198,6 +198,8 @@ object AST {
         => acc(f(v),f(b))
       case IfE(p,x,y)
         => acc(f(p),acc(f(x),f(y)))
+      case MatchE(x,cs)
+        => cs.map{ case Case(p,c,b) => acc(f(c),f(b)) }.fold(f(x))(acc)
       case Tuple(es)
         => es.map(f).fold(zero)(acc)
       case Sequence(es)

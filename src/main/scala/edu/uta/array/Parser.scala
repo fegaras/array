@@ -121,7 +121,7 @@ object Parser extends StandardTokenParsers {
                   { case (e,r) => MethodCall(r,"::",List(e)) } }
 
   def matches: Parser[Expr]
-      = factor ~ rep( "match" ~ "{" ~ rep1sep( "case" ~ pat ~ opt( "by" ~> expr ) ~ "=>" ~ expr, sem ) ~ "}" ) ^^
+      = factor ~ rep( "match" ~ "{" ~ rep1sep( "case" ~ pat ~ opt( "if" ~> expr ) ~ "=>" ~ expr, sem ) ~ "}" ) ^^
         { case a~as
             => as.foldLeft(a){ case (r,_~_~cs~_)
                                  => MatchE(r,cs.map{ case _~p~Some(c)~_~b => Case(p,c,b)
@@ -159,7 +159,7 @@ object Parser extends StandardTokenParsers {
           { case o~e => MethodCall(e,"unary_"+o,null) }
         | allInfixOpr ~ "/" ~ factor ^^
           { case op~_~e => reduce(op,e) }
-        | "{" ~> rep1sep( "case" ~ pat ~ opt( "by" ~> expr ) ~ "=>" ~ expr, sem ) <~ "}" ^^
+        | "{" ~> rep1sep( "case" ~ pat ~ opt( "if" ~> expr ) ~ "=>" ~ expr, sem ) <~ "}" ^^
           { cs => { val nv = AST.newvar
                     Lambda(VarPat(nv),
                            MatchE(Var(nv),
